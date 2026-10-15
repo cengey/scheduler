@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from scheduler.api.routes import router as api_router
+from scheduler.db import init_db
 
 # Locate static folder relative to this file
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -13,6 +14,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application instance."""
+    init_db()
     app = FastAPI(
         title="Scheduler Local App",
         description="Local backend server and desktop-like frontend interface.",

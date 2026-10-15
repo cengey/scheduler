@@ -1,96 +1,617 @@
-// Scheduler Frontend Application Logic
+// Scheduler Desktop Frontend Application Logic
 
 const API_BASE = '/api';
 
 // State
-let tasks = [];
-let currentFilter = 'all';
-let searchQuery = '';
+let teachers = [];
+let adjustments = [];
+let currentScheduleId = null;
+let reviewPage = 0;
+const reviewPageSize = 25;
+let serverStartedAt = null;
 
 // DOM Elements
-const taskListEl = document.getElementById('taskList');
-const statTotalEl = document.getElementById('statTotal');
-const statActiveEl = document.getElementById('statActive');
-const statUptimeEl = document.getElementById('statUptime');
 const statusBadgeEl = document.getElementById('statusBadge');
 const statusTextEl = document.getElementById('statusText');
-
-const taskModal = document.getElementById('taskModal');
-const openModalBtn = document.getElementById('openModalBtn');
-const closeModalBtn = document.getElementById('closeModalBtn');
-const cancelModalBtn = document.getElementById('cancelModalBtn');
-const taskForm = document.getElementById('taskForm');
-
-const searchInput = document.getElementById('searchInput');
-const filterBtns = document.querySelectorAll('.filter-btn');
 const toastContainer = document.getElementById('toastContainer');
-
 const themeToggleBtn = document.getElementById('themeToggleBtn');
 const themeIconSun = document.getElementById('themeIconSun');
 const themeIconMoon = document.getElementById('themeIconMoon');
 
-// Server start time (client clock), derived from a single health check.
-// Uptime is then ticked locally so we don't need to poll the backend.
-let serverStartedAt = null;
+// Navigation
+const navItems = document.querySelectorAll('.nav-item');
+const viewPanels = document.querySelectorAll('.view-panel');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
-  fetchHealth(); // One-time check on load
-  fetchTasks();
-  setInterval(renderUptime, 1000); // Local tick only, no network request
+  fetchHealth();
+  setInterval(renderUptime, 1000);
 
-  // Re-check only when the user returns to the window (e.g. server may have restarted)
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') fetchHealth();
-  });
-
-  setupEventListeners();
+  setupNavigation();
+  setupGeneratorView();
+  setupTeachersView();
+  setupShiftsView();
+  setupAdjustmentsView();
 });
 
-function setupEventListeners() {
-  // Modal handlers
-  openModalBtn.addEventListener('click', () => showModal(true));
-  closeModalBtn.addEventListener('click', () => showModal(false));
-  cancelModalBtn.addEventListener('click', () => showModal(false));
+// ==============================================================================
+// Navigation (Sidebar Multi-View Switcher)
+// ==============================================================================
+function setupNavigation() {
+  navItems.forEach((item) => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetViewId = item.dataset.view;
+      if (!targetViewId) return;
 
-  taskModal.addEventListener('click', (e) => {
-    if (e.target === taskModal) showModal(false);
+      navItems.forEach((nav) => nav.classList.remove('active'));
+      viewPanels.forEach((panel) => panel.classList.remove('active'));
+
+      item.classList.add('active');
+      const targetPanel = document.getElementById(targetViewId);
+      if (targetPanel) targetPanel.classList.add('active');
+
+      // Refresh view-specific data
+      if (targetViewId === 'teachersView') fetchTeachers();
+      if (targetViewId === 'shiftsView') fetchShifts();
+      if (targetViewId === 'adjustmentsView') fetchAdjustments();
+    });
   });
+}
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && taskModal.classList.contains('show')) {
-      showModal(false);
+// ==============================================================================
+// View 1: Schedule Generator & Review
+// ==============================================================================
+function setupGeneratorView() {
+  const form = document.getElementById('scheduleGenForm');
+  const weekDateInput = document.getElementById('weekStartDate');
+  const dateHint = document.getElementById('dateHintText');
+
+  // Restrict to Monday on change
+  weekDateInput.addEventListener('change', () => {
+    if (!weekDateInput.value) return;
+    const d = new Date(weekDateInput.value + 'T00:00:00');
+    if (d.getDay() !== 1) {
+      dateHint.style.color = 'var(--danger)';
+      dateHint.textContent = 'Selected date is not a Monday. Please select a Monday.';
+    } else {
+      dateHint.style.color = 'var(--text-light)';
+      dateHint.textContent = `Valid week starting Monday, ${weekDateInput.value}`;
     }
   });
 
-  // Form submission
-  taskForm.addEventListener('submit', handleCreateTask);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = new Date(weekDateInput.value + 'T00:00:00');
+    if (d.getDay() !== 1) {
+      alert('The start of the week must always be a Monday.');
+      return;
+    }
 
-  // Search input
-  searchInput.addEventListener('input', (e) => {
-    searchQuery = e.target.value.toLowerCase().trim();
-    renderTasks();
+    const btn = document.getElementById('btnRunSchedule');
+    btn.disabled = true;
+    btn.innerHTML = 'Generating Roster...';
+
+    const formData = new FormData();
+    formData.append('week_start_date', weekDateInput.value);
+    formData.append('type_file_1', document.getElementById('typeFile1').value);
+    formData.append('file_1', document.getElementById('file1').files[0]);
+    formData.append('type_file_2', document.getElementById('typeFile2').value);
+    formData.append('file_2', document.getElementById('file2').files[0]);
+    formData.append('type_file_3', document.getElementById('typeFile3').value);
+    formData.append('file_3', document.getElementById('file3').files[0]);
+    formData.append('file_schedule', document.getElementById('fileSchedule').files[0]);
+    formData.append('allow_7h_override', document.getElementById('allow7hOverride').checked ? 'true' : 'false');
+
+    try {
+      const res = await fetch(`${API_BASE}/generate-schedule`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to generate schedule');
+      }
+
+      const data = await res.json();
+      currentScheduleId = data.schedule_id;
+      showToast('Schedule generated successfully!');
+
+      renderGeneratorResults(data);
+    } catch (err) {
+      alert(`Error generating schedule: ${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+        </svg>
+        Generate Proposed Schedule
+      `;
+    }
   });
 
-  // Filter tabs
+  // Review Table Search and Filters
+  document.getElementById('reviewSearch').addEventListener('input', () => {
+    reviewPage = 0;
+    fetchReviewClasses();
+  });
+  document.getElementById('reviewClassType').addEventListener('change', () => {
+    reviewPage = 0;
+    fetchReviewClasses();
+  });
+
+  document.getElementById('btnPrevPage').addEventListener('click', () => {
+    if (reviewPage > 0) {
+      reviewPage--;
+      fetchReviewClasses();
+    }
+  });
+  document.getElementById('btnNextPage').addEventListener('click', () => {
+    reviewPage++;
+    fetchReviewClasses();
+  });
+}
+
+function renderGeneratorResults(data) {
+  const stats = data.stats;
+  document.getElementById('resTotalClasses').textContent = stats.total_classes.toLocaleString();
+  document.getElementById('resClassBreakdown').textContent = `Adults: ${stats.adult_count} | Teens: ${stats.teens_count} | Speak+: ${stats.speak_plus_count}`;
+  document.getElementById('resTotalChanges').textContent = stats.total_changes.toLocaleString();
+  document.getElementById('resChangeBreakdown').textContent = `Added: ${stats.added_count} | Removed: ${stats.removed_count}`;
+  document.getElementById('resPlaceholderCount').textContent = stats.unassigned_count.toLocaleString();
+
+  // Show sections & enable export
+  document.getElementById('resultsSummarySection').style.display = 'block';
+  const exportBtn = document.getElementById('downloadExcelBtn');
+  exportBtn.href = `${API_BASE}/schedule/${data.schedule_id}/export`;
+  document.getElementById('exportActionContainer').style.display = 'block';
+
+  // Load first page of classes
+  reviewPage = 0;
+  fetchReviewClasses();
+}
+
+async function fetchReviewClasses() {
+  if (!currentScheduleId) return;
+  const search = document.getElementById('reviewSearch').value.trim();
+  const ctype = document.getElementById('reviewClassType').value;
+  const offset = reviewPage * reviewPageSize;
+
+  let url = `${API_BASE}/schedule/${currentScheduleId}/classes?limit=${reviewPageSize}&offset=${offset}`;
+  if (search) url += `&search=${encodeURIComponent(search)}`;
+  if (ctype) url += `&class_type=${encodeURIComponent(ctype)}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+    renderReviewTable(data.items, data.total, offset);
+  } catch (err) {
+    console.error('Failed to load review classes', err);
+  }
+}
+
+function renderReviewTable(items, total, offset) {
+  const tbody = document.getElementById('reviewTableBody');
+  const pageInfo = document.getElementById('reviewPageInfo');
+  const btnPrev = document.getElementById('btnPrevPage');
+  const btnNext = document.getElementById('btnNextPage');
+
+  const startIdx = total === 0 ? 0 : offset + 1;
+  const endIdx = Math.min(offset + items.length, total);
+  pageInfo.textContent = `Showing ${startIdx}–${endIdx} of ${total} classes`;
+
+  btnPrev.disabled = reviewPage === 0;
+  btnNext.disabled = endIdx >= total;
+
+  if (items.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align: center; padding: 32px; color: var(--text-muted);">
+          No classes match your filter criteria.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = items.map((c) => {
+    let actionBadge = `<span class="badge badge-priority-low">Kept</span>`;
+    if (c.action === 'added') {
+      actionBadge = `<span class="badge badge-status-active">+ Added</span>`;
+    } else if (c.action === 'added_unassigned') {
+      actionBadge = `<span class="badge badge-priority-high">Placeholder</span>`;
+    }
+
+    return `
+      <tr>
+        <td style="font-weight: 500;">${escapeHtml(c.time)}</td>
+        <td style="color: var(--text-muted);">${escapeHtml(c.end_time)}</td>
+        <td>
+          <strong>${escapeHtml(c.name)}</strong>
+          ${c.hidden === 'Yes' ? '<span class="badge badge-priority-high ml-1">Hidden</span>' : ''}
+        </td>
+        <td><code>${escapeHtml(c.account)}</code></td>
+        <td>${escapeHtml(c.vtc || '-')}</td>
+        <td>
+          <span class="badge badge-priority-${c.class_type === 'Teens' ? 'medium' : (c.class_type === 'Speak+' ? 'high' : 'low')}">
+            ${escapeHtml(c.class_type)}
+          </span>
+        </td>
+        <td>${actionBadge}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+
+// ==============================================================================
+// View 2: Teachers & Qualifications
+// ==============================================================================
+let currentTeacherFilter = 'all';
+let teacherSearchQuery = '';
+
+function setupTeachersView() {
+  const searchInput = document.getElementById('teacherSearchInput');
+  const filterBtns = document.querySelectorAll('[data-tfilter]');
+  const addModal = document.getElementById('teacherModal');
+  const btnOpen = document.getElementById('btnOpenAddTeacher');
+  const btnClose = document.getElementById('btnCloseTeacherModal');
+  const btnCancel = document.getElementById('btnCancelTeacherModal');
+  const form = document.getElementById('teacherForm');
+
+  searchInput.addEventListener('input', (e) => {
+    teacherSearchQuery = e.target.value.toLowerCase().trim();
+    renderTeachersTable();
+  });
+
   filterBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
       filterBtns.forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      currentFilter = btn.dataset.filter;
-      renderTasks();
+      currentTeacherFilter = btn.dataset.tfilter;
+      renderTeachersTable();
     });
   });
 
-  // Theme toggle
-  themeToggleBtn.addEventListener('click', toggleTheme);
+  btnOpen.addEventListener('click', () => {
+    form.reset();
+    document.getElementById('teacherModalTitle').textContent = 'Add New Teacher';
+    document.getElementById('tAccount').readOnly = false;
+    addModal.classList.add('show');
+  });
+
+  const closeTeacherModal = () => addModal.classList.remove('show');
+  btnClose.addEventListener('click', closeTeacherModal);
+  btnCancel.addEventListener('click', closeTeacherModal);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      account: document.getElementById('tAccount').value.trim(),
+      name: document.getElementById('tName').value.trim(),
+      vtc: document.getElementById('tVtc').value.trim(),
+      status: document.getElementById('tStatus').value,
+      shift_id: document.getElementById('tShift').value,
+      fixed_day_off: document.getElementById('tDayOff').value,
+      weekend_group: document.getElementById('tWeekendGroup').value,
+      teens_qualified: document.getElementById('tTeens').checked,
+      speak_plus_qualified: document.getElementById('tSpeakPlus').checked,
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/teachers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        closeTeacherModal();
+        showToast(`Teacher ${payload.name} saved`);
+        fetchTeachers();
+      } else {
+        const err = await res.json();
+        alert(`Error: ${err.detail || 'Could not save teacher'}`);
+      }
+    } catch (err) {
+      alert(`Error saving teacher: ${err.message}`);
+    }
+  });
+
+  fetchTeachers();
 }
 
-// Theme handling
+async function fetchTeachers() {
+  try {
+    const res = await fetch(`${API_BASE}/teachers`);
+    if (res.ok) {
+      teachers = await res.json();
+      renderTeachersTable();
+      populateTeacherDropdowns();
+    }
+  } catch (err) {
+    console.error('Failed to load teachers', err);
+  }
+}
+
+function renderTeachersTable() {
+  const tbody = document.getElementById('teachersTableBody');
+  if (!tbody) return;
+
+  const filtered = teachers.filter((t) => {
+    if (currentTeacherFilter === 'teens' && !t.teens_qualified) return false;
+    if (currentTeacherFilter === 'speak_plus' && !t.speak_plus_qualified) return false;
+    if (currentTeacherFilter === 'active' && t.status !== 'active') return false;
+
+    if (teacherSearchQuery) {
+      const nameMatch = (t.name || '').toLowerCase().includes(teacherSearchQuery);
+      const accMatch = (t.account || '').toLowerCase().includes(teacherSearchQuery);
+      const vtcMatch = (t.vtc || '').toLowerCase().includes(teacherSearchQuery);
+      return nameMatch || accMatch || vtcMatch;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="10" style="text-align: center; padding: 36px; color: var(--text-muted);">
+          No teachers found.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map((t) => `
+    <tr>
+      <td><strong>${escapeHtml(t.name)}</strong></td>
+      <td><code>${escapeHtml(t.account)}</code></td>
+      <td>${escapeHtml(t.vtc || '-')}</td>
+      <td><span class="badge badge-priority-low">${escapeHtml(t.shift_id.toUpperCase())}</span></td>
+      <td>${escapeHtml(t.fixed_day_off)}</td>
+      <td><span class="badge badge-priority-medium">Group ${escapeHtml(t.weekend_group)}</span></td>
+      <td>
+        <button class="btn btn-sm ${t.teens_qualified ? 'btn-primary' : 'btn-secondary'}"
+                onclick="toggleQualification('${t.account}', 'teens_qualified', ${!t.teens_qualified})">
+          ${t.teens_qualified ? 'Teens Yes' : 'No'}
+        </button>
+      </td>
+      <td>
+        <button class="btn btn-sm ${t.speak_plus_qualified ? 'btn-primary' : 'btn-secondary'}"
+                onclick="toggleQualification('${t.account}', 'speak_plus_qualified', ${!t.speak_plus_qualified})">
+          ${t.speak_plus_qualified ? 'Speak+ Yes' : 'No'}
+        </button>
+      </td>
+      <td>
+        <span class="badge badge-status-${t.status === 'active' ? 'active' : 'paused'}">
+          ${escapeHtml(t.status.toUpperCase())}
+        </span>
+      </td>
+      <td>
+        <button class="btn btn-sm btn-danger-ghost" onclick="deleteTeacher('${t.account}')" title="Delete Teacher">
+          Delete
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+window.toggleQualification = async function(account, field, value) {
+  try {
+    const res = await fetch(`${API_BASE}/teachers/${account}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value }),
+    });
+    if (res.ok) {
+      showToast('Qualification updated');
+      fetchTeachers();
+    }
+  } catch (err) {
+    console.error('Error toggling qualification', err);
+  }
+};
+
+window.deleteTeacher = async function(account) {
+  if (!confirm(`Are you sure you want to delete teacher ${account}?`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/teachers/${account}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Teacher deleted');
+      fetchTeachers();
+    }
+  } catch (err) {
+    console.error('Error deleting teacher', err);
+  }
+};
+
+function populateTeacherDropdowns() {
+  const sel = document.getElementById('adjTeacherSelect');
+  if (!sel) return;
+  sel.innerHTML = teachers.map((t) => `
+    <option value="${t.account}">${escapeHtml(t.name)} (${t.account})</option>
+  `).join('');
+}
+
+
+// ==============================================================================
+// View 3: Shifts & Off Days
+// ==============================================================================
+async function fetchShifts() {
+  try {
+    const res = await fetch(`${API_BASE}/shifts`);
+    if (res.ok) {
+      const shifts = await res.json();
+      renderShiftsCards(shifts);
+    }
+  } catch (err) {
+    console.error('Failed to load shifts', err);
+  }
+}
+
+function renderShiftsCards(shifts) {
+  const grid = document.getElementById('shiftsCardsGrid');
+  if (!grid) return;
+
+  grid.innerHTML = shifts.map((s) => `
+    <div class="stat-card">
+      <div class="stat-header">
+        <span class="stat-label">${escapeHtml(s.name)}</span>
+        <span class="badge badge-priority-low">${escapeHtml(s.id.toUpperCase())}</span>
+      </div>
+      <div class="stat-value" style="font-size: 20px; margin-top: 10px;">
+        ${escapeHtml(s.start_time)} – ${escapeHtml(s.end_time)}
+      </div>
+      <span class="stat-sub">${escapeHtml(s.description || 'Configured working window')}</span>
+    </div>
+  `).join('');
+}
+
+
+// ==============================================================================
+// View 4: Schedule Adjustments
+// ==============================================================================
+function setupAdjustmentsView() {
+  const modal = document.getElementById('adjModal');
+  const btnOpen = document.getElementById('btnOpenAddAdjustment');
+  const btnClose = document.getElementById('btnCloseAdjModal');
+  const btnCancel = document.getElementById('btnCancelAdjModal');
+  const form = document.getElementById('adjForm');
+
+  btnOpen.addEventListener('click', () => {
+    form.reset();
+    populateTeacherDropdowns();
+    modal.classList.add('show');
+  });
+
+  const closeModal = () => modal.classList.remove('show');
+  btnClose.addEventListener('click', closeModal);
+  btnCancel.addEventListener('click', closeModal);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      teacher_account: document.getElementById('adjTeacherSelect').value,
+      type: document.getElementById('adjType').value,
+      time_value: document.getElementById('adjTimeVal').value.trim(),
+      day_of_week: document.getElementById('adjDayOfWeek').value,
+      start_date: document.getElementById('adjStartDate').value,
+      end_date: document.getElementById('adjEndDate').value,
+      reason: document.getElementById('adjReason').value.trim(),
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/adjustments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        closeModal();
+        showToast('Adjustment created');
+        fetchAdjustments();
+      } else {
+        alert('Failed to save adjustment');
+      }
+    } catch (err) {
+      alert(`Error saving adjustment: ${err.message}`);
+    }
+  });
+
+  fetchAdjustments();
+}
+
+async function fetchAdjustments() {
+  try {
+    const res = await fetch(`${API_BASE}/adjustments`);
+    if (res.ok) {
+      adjustments = await res.json();
+      renderAdjustmentsTable();
+    }
+  } catch (err) {
+    console.error('Failed to load adjustments', err);
+  }
+}
+
+function renderAdjustmentsTable() {
+  const tbody = document.getElementById('adjustmentsTableBody');
+  if (!tbody) return;
+
+  if (adjustments.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" style="text-align: center; padding: 36px; color: var(--text-muted);">
+          No adjustments recorded. Click "Add Adjustment" to configure specific constraints (e.g. childcare, unavailability).
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = adjustments.map((a) => {
+    let typeBadge = `<span class="badge badge-priority-medium">${escapeHtml(a.type.replace('_', ' ').toUpperCase())}</span>`;
+    return `
+      <tr>
+        <td><strong>${escapeHtml(a.teacher_name)}</strong><br><small class="text-muted">${escapeHtml(a.teacher_account)}</small></td>
+        <td>${typeBadge}</td>
+        <td><code>${escapeHtml(a.time_value || 'Full Day')}</code></td>
+        <td>${escapeHtml(a.day_of_week)}</td>
+        <td>${escapeHtml(a.start_date)} ${a.end_date ? 'to ' + escapeHtml(a.end_date) : '(Ongoing)'}</td>
+        <td>${escapeHtml(a.reason || '-')}</td>
+        <td>
+          <button class="btn btn-sm ${a.is_active ? 'btn-primary' : 'btn-secondary'}" onclick="toggleAdjustment('${a.id}')">
+            ${a.is_active ? 'Active' : 'Disabled'}
+          </button>
+        </td>
+        <td>
+          <button class="btn btn-sm btn-danger-ghost" onclick="deleteAdjustment('${a.id}')">
+            Delete
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+window.toggleAdjustment = async function(id) {
+  try {
+    const res = await fetch(`${API_BASE}/adjustments/${id}/toggle`, { method: 'PATCH' });
+    if (res.ok) {
+      showToast('Adjustment toggled');
+      fetchAdjustments();
+    }
+  } catch (err) {
+    console.error('Error toggling adjustment', err);
+  }
+};
+
+window.deleteAdjustment = async function(id) {
+  if (!confirm('Are you sure you want to delete this adjustment?')) return;
+  try {
+    const res = await fetch(`${API_BASE}/adjustments/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Adjustment deleted');
+      fetchAdjustments();
+    }
+  } catch (err) {
+    console.error('Error deleting adjustment', err);
+  }
+};
+
+
+// ==============================================================================
+// System & Feedback Utilities
+// ==============================================================================
 function initTheme() {
   const saved = localStorage.getItem('scheduler-theme') || 'light';
   applyTheme(saved);
+  themeToggleBtn.addEventListener('click', toggleTheme);
 }
 
 function toggleTheme() {
@@ -113,18 +634,7 @@ function applyTheme(theme) {
   }
 }
 
-function showModal(show) {
-  if (show) {
-    taskForm.reset();
-    taskModal.classList.add('show');
-    document.getElementById('taskTitle').focus();
-  } else {
-    taskModal.classList.remove('show');
-  }
-}
-
-// Toast Feedback Notification
-function showToast(message, type = 'info') {
+function showToast(message) {
   const toast = document.createElement('div');
   toast.className = 'toast';
   toast.innerHTML = `
@@ -143,213 +653,29 @@ function showToast(message, type = 'info') {
   }, 2600);
 }
 
-// Fetch Backend Health & Update Status Badge (called on load / window refocus only)
 async function fetchHealth() {
   try {
     const res = await fetch(`${API_BASE}/health`);
     if (res.ok) {
       const data = await res.json();
       serverStartedAt = Date.now() - data.uptime_seconds * 1000;
-      markConnected();
-      renderUptime();
-    } else {
-      markDisconnected();
+      statusBadgeEl.style.color = 'var(--success)';
+      statusBadgeEl.style.backgroundColor = 'var(--success-tint)';
+      statusBadgeEl.style.borderColor = 'var(--success-border)';
+      statusTextEl.textContent = 'Backend: Connected';
     }
   } catch (err) {
-    markDisconnected();
+    statusBadgeEl.style.color = 'var(--danger)';
+    statusBadgeEl.style.backgroundColor = 'var(--danger-tint)';
+    statusBadgeEl.style.borderColor = 'var(--danger-border)';
+    statusTextEl.textContent = 'Backend: Disconnected';
   }
 }
 
-function formatUptime(totalSeconds) {
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
-// Purely client-side: no network request
 function renderUptime() {
-  if (serverStartedAt === null || !statUptimeEl) return;
-  const seconds = Math.max(0, Math.floor((Date.now() - serverStartedAt) / 1000));
-  statUptimeEl.textContent = formatUptime(seconds);
+  // Pure local tick - no network requests
+  if (!serverStartedAt) return;
 }
-
-function markConnected() {
-  statusBadgeEl.style.color = 'var(--success)';
-  statusBadgeEl.style.backgroundColor = 'var(--success-tint)';
-  statusBadgeEl.style.borderColor = 'var(--success-border)';
-  statusTextEl.textContent = 'Backend: Connected';
-}
-
-function markDisconnected() {
-  serverStartedAt = null;
-  if (statUptimeEl) statUptimeEl.textContent = '-';
-  statusBadgeEl.style.color = 'var(--danger)';
-  statusBadgeEl.style.backgroundColor = 'var(--danger-tint)';
-  statusBadgeEl.style.borderColor = 'var(--danger-border)';
-  statusTextEl.textContent = 'Backend: Disconnected';
-}
-
-// Fetch Tasks
-async function fetchTasks() {
-  try {
-    const res = await fetch(`${API_BASE}/tasks`);
-    if (res.ok) {
-      tasks = await res.json();
-      renderTasks();
-    }
-  } catch (err) {
-    // A real request failing is the signal that the backend is down
-    markDisconnected();
-    console.error('Failed to load tasks', err);
-  }
-}
-
-// Render Tasks with search and filters
-function renderTasks() {
-  statTotalEl.textContent = tasks.length;
-  const activeCount = tasks.filter((t) => t.status === 'active').length;
-  statActiveEl.textContent = activeCount;
-
-  // Filter tasks
-  let filtered = tasks.filter((t) => {
-    if (currentFilter === 'active' && t.status !== 'active') return false;
-    if (currentFilter === 'paused' && t.status !== 'paused') return false;
-    if (currentFilter === 'high' && t.priority !== 'high') return false;
-
-    if (searchQuery) {
-      const titleMatch = (t.title || '').toLowerCase().includes(searchQuery);
-      const scheduleMatch = (t.time_or_cron || '').toLowerCase().includes(searchQuery);
-      const descMatch = (t.description || '').toLowerCase().includes(searchQuery);
-      return titleMatch || scheduleMatch || descMatch;
-    }
-    return true;
-  });
-
-  if (filtered.length === 0) {
-    taskListEl.innerHTML = `
-      <div style="text-align: center; padding: 48px 24px; color: var(--text-muted); background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border-color); box-shadow: var(--shadow-sm);">
-        <p style="font-size: 14px; font-weight: 600; color: var(--text-main); margin-bottom: 6px;">
-          ${searchQuery ? 'No matching schedules found' : 'No scheduled tasks yet'}
-        </p>
-        <p style="font-size: 13px; margin-bottom: 16px;">
-          ${searchQuery ? 'Try clearing your search query or filter.' : 'Click "Add Schedule" to configure your first automated routine.'}
-        </p>
-        ${
-          searchQuery
-            ? `<button class="btn btn-secondary btn-sm" onclick="clearSearch()">Clear Search</button>`
-            : `<button class="btn btn-primary btn-sm" onclick="showModal(true)">+ Add Schedule</button>`
-        }
-      </div>
-    `;
-    return;
-  }
-
-  taskListEl.innerHTML = filtered
-    .map(
-      (task) => `
-    <div class="task-item" id="task-${task.id}">
-      <div class="task-info">
-        <div class="task-title-row">
-          <span class="task-title">${escapeHtml(task.title)}</span>
-          <span class="badge badge-priority-${task.priority}">${task.priority}</span>
-          <span class="badge badge-status-${task.status}">
-            ● ${task.status.toUpperCase()}
-          </span>
-        </div>
-        <div class="task-meta">
-          <span class="task-meta-time">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <polyline points="12 6 12 12 16 14"></polyline>
-            </svg>
-            ${escapeHtml(task.time_or_cron)}
-          </span>
-          ${task.description ? `<span>· ${escapeHtml(task.description)}</span>` : ''}
-        </div>
-      </div>
-      <div class="task-actions">
-        <button class="btn btn-sm btn-secondary" onclick="toggleTask('${task.id}')">
-          ${task.status === 'active' ? 'Pause' : 'Resume'}
-        </button>
-        <button class="btn btn-sm btn-danger-ghost" title="Delete Schedule" onclick="deleteTask('${task.id}')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          </svg>
-          Delete
-        </button>
-      </div>
-    </div>
-  `
-    )
-    .join('');
-}
-
-window.clearSearch = function () {
-  searchInput.value = '';
-  searchQuery = '';
-  renderTasks();
-};
-
-// Handle Add Task Form Submit
-async function handleCreateTask(e) {
-  e.preventDefault();
-  const payload = {
-    title: document.getElementById('taskTitle').value.trim(),
-    time_or_cron: document.getElementById('taskSchedule').value.trim(),
-    description: document.getElementById('taskDesc').value.trim(),
-    priority: document.getElementById('taskPriority').value,
-  };
-
-  try {
-    const res = await fetch(`${API_BASE}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (res.ok) {
-      showModal(false);
-      await fetchTasks();
-      showToast(`Schedule "${payload.title}" created`);
-    } else {
-      alert('Failed to create task');
-    }
-  } catch (err) {
-    console.error('Error creating task', err);
-  }
-}
-
-// Toggle Task
-window.toggleTask = async function (id) {
-  try {
-    const res = await fetch(`${API_BASE}/tasks/${id}/toggle`, { method: 'PATCH' });
-    if (res.ok) {
-      const updated = await res.json();
-      await fetchTasks();
-      showToast(`Schedule ${updated.status === 'active' ? 'resumed' : 'paused'}`);
-    }
-  } catch (err) {
-    console.error('Error toggling task', err);
-  }
-};
-
-// Delete Task
-window.deleteTask = async function (id) {
-  if (!confirm('Are you sure you want to delete this schedule?')) return;
-  try {
-    const res = await fetch(`${API_BASE}/tasks/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      await fetchTasks();
-      showToast('Schedule deleted');
-    }
-  } catch (err) {
-    console.error('Error deleting task', err);
-  }
-};
 
 function escapeHtml(str) {
   const div = document.createElement('div');

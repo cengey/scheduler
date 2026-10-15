@@ -7,4 +7,23 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+.venv/
+
+# Local database and data directories
+*.db
+*.sqlite
+*.sqlite3
+data/
+uploads/
+exports/
+
+# Client spreadsheets and sensitive scheduling files
+Scheduling/
+*.xlsx
+*.xls
+*.csv
+*:Zone.Identifier
+
+# System and logs
+.DS_Store
+*.log

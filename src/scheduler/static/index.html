@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Scheduler</title>
+  <title>Scheduler Desktop</title>
   <link rel="icon" type="image/svg+xml" href="/assets/icon.svg">
   <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/css/style.css">
@@ -56,36 +56,48 @@
 
     <!-- App Body (Sidebar + Content) -->
     <div class="app-body">
-      <!-- Sidebar -->
+      <!-- Sidebar Navigation -->
       <aside class="app-sidebar">
         <nav>
           <ul class="nav-list">
             <li>
-              <a class="nav-item active">
+              <a class="nav-item active" data-view="generatorView">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
                   <line x1="16" y1="2" x2="16" y2="6"></line>
                   <line x1="8" y1="2" x2="8" y2="6"></line>
                   <line x1="3" y1="10" x2="21" y2="10"></line>
                 </svg>
-                Schedules
+                Schedule Generator
               </a>
             </li>
             <li>
-              <a class="nav-item">
+              <a class="nav-item" data-view="teachersView">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="9" cy="7" r="4"></circle>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                 </svg>
-                Execution Log
+                Teachers &amp; Skills
               </a>
             </li>
             <li>
-              <a class="nav-item">
+              <a class="nav-item" data-view="shiftsView">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="3"></circle>
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
                 </svg>
-                Settings
+                Shifts &amp; Off Days
+              </a>
+            </li>
+            <li>
+              <a class="nav-item" data-view="adjustmentsView">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+                Adjustments
               </a>
             </li>
           </ul>
@@ -94,129 +106,487 @@
         <div class="sidebar-footer">
           <div>Local Backend: FastAPI</div>
           <div>Environment: Python + UV</div>
+          <div>Data Storage: Local SQLite</div>
         </div>
       </aside>
 
-      <!-- Main Content -->
+      <!-- Main Content Container -->
       <main class="app-content">
-        <div class="content-header">
-          <div>
-            <h1 class="page-title">Task Scheduler</h1>
-            <p class="page-subtitle">Manage automated background routines on your local machine.</p>
-          </div>
-          <button class="btn btn-primary" id="openModalBtn">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            Add Schedule
-          </button>
-        </div>
 
-        <!-- Metrics Overview -->
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-header">
-              <span class="stat-label">Total Schedules</span>
-              <svg class="stat-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                <line x1="16" y1="2" x2="16" y2="6"></line>
-                <line x1="8" y1="2" x2="8" y2="6"></line>
-              </svg>
+        <!-- ================================================================
+             VIEW 1: SCHEDULE GENERATOR & REVIEW
+             ================================================================ -->
+        <section id="generatorView" class="view-panel active">
+          <div class="content-header">
+            <div>
+              <h1 class="page-title">Weekly Schedule Generator</h1>
+              <p class="page-subtitle">Upload demand distributions and existing schedule to generate a proposed roster.</p>
             </div>
-            <div class="stat-value" id="statTotal">-</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">
-              <span class="stat-label">Active Tasks</span>
-              <svg class="stat-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-              </svg>
+            <div id="exportActionContainer" style="display: none;">
+              <a id="downloadExcelBtn" href="#" class="btn btn-primary" download>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Export Sandbox Excel
+              </a>
             </div>
-            <div class="stat-value" id="statActive">-</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-header">
-              <span class="stat-label">Server Uptime</span>
-              <svg class="stat-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12 6 12 12 16 14"></polyline>
-              </svg>
+
+          <!-- Upload & Configuration Card -->
+          <div class="card mb-4" id="uploadFormCard">
+            <h3 class="card-title mb-3">Input Files &amp; Week Selection</h3>
+            <form id="scheduleGenForm">
+              <div class="form-row mb-3">
+                <div class="form-group flex-1">
+                  <label for="weekStartDate">Select Week (Monday Required)</label>
+                  <input type="date" id="weekStartDate" class="form-input" required>
+                  <span class="form-hint" id="dateHintText">Must pick a Monday (e.g. 2026-11-09)</span>
+                </div>
+                <div class="form-group flex-1">
+                  <label>Rules &amp; Overrides</label>
+                  <div style="padding-top: 8px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+                      <input type="checkbox" id="allow7hOverride" style="width: 16px; height: 16px;">
+                      <span>Allow daily cap override to 7 hours if needed</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3 Distribution Files with Dropdowns -->
+              <div class="distribution-upload-grid mb-3">
+                <div class="dist-upload-box">
+                  <div class="dist-header">
+                    <span class="dist-label">Distribution File 1</span>
+                    <select id="typeFile1" class="form-select form-select-sm">
+                      <option value="Adult" selected>Adults (1 Hour)</option>
+                      <option value="Teens">Teens (1 Hour)</option>
+                      <option value="Speak+">Speak+ (30 Mins)</option>
+                    </select>
+                  </div>
+                  <input type="file" id="file1" class="form-file-input" accept=".xlsx" required>
+                </div>
+
+                <div class="dist-upload-box">
+                  <div class="dist-header">
+                    <span class="dist-label">Distribution File 2</span>
+                    <select id="typeFile2" class="form-select form-select-sm">
+                      <option value="Teens" selected>Teens (1 Hour)</option>
+                      <option value="Adult">Adults (1 Hour)</option>
+                      <option value="Speak+">Speak+ (30 Mins)</option>
+                    </select>
+                  </div>
+                  <input type="file" id="file2" class="form-file-input" accept=".xlsx" required>
+                </div>
+
+                <div class="dist-upload-box">
+                  <div class="dist-header">
+                    <span class="dist-label">Distribution File 3</span>
+                    <select id="typeFile3" class="form-select form-select-sm">
+                      <option value="Speak+" selected>Speak+ (30 Mins)</option>
+                      <option value="Adult">Adults (1 Hour)</option>
+                      <option value="Teens">Teens (1 Hour)</option>
+                    </select>
+                  </div>
+                  <input type="file" id="file3" class="form-file-input" accept=".xlsx" required>
+                </div>
+              </div>
+
+              <!-- Current Schedule File -->
+              <div class="form-group mb-4">
+                <label for="fileSchedule">Current / Benchmark Schedule (.xlsx)</label>
+                <input type="file" id="fileSchedule" class="form-file-input" accept=".xlsx" required>
+                <span class="form-hint">E.g., TRGTC Sandbox Schedule.xlsx format (Classes tab)</span>
+              </div>
+
+              <div style="display: flex; justify-content: flex-end;">
+                <button type="submit" class="btn btn-primary" id="btnRunSchedule">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  Generate Proposed Schedule
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Results Summary (Shown after run) -->
+          <div id="resultsSummarySection" style="display: none;">
+            <div class="stats-grid mb-4">
+              <div class="stat-card">
+                <div class="stat-header">
+                  <span class="stat-label">Total Classes</span>
+                </div>
+                <div class="stat-value" id="resTotalClasses">-</div>
+                <span class="stat-sub" id="resClassBreakdown">Adults: - | Teens: - | Speak+: -</span>
+              </div>
+              <div class="stat-card">
+                <div class="stat-header">
+                  <span class="stat-label">Changes from Schedule</span>
+                </div>
+                <div class="stat-value" id="resTotalChanges">-</div>
+                <span class="stat-sub" id="resChangeBreakdown">Added: - | Removed: -</span>
+              </div>
+              <div class="stat-card">
+                <div class="stat-header">
+                  <span class="stat-label">Unassigned / Placeholder</span>
+                </div>
+                <div class="stat-value" id="resPlaceholderCount">-</div>
+                <span class="stat-sub">Flagged as Hidden = Yes</span>
+              </div>
             </div>
-            <div class="stat-value" id="statUptime">-</div>
-          </div>
-        </div>
 
-        <!-- Controls Bar: Search & Filter Tabs -->
-        <div class="controls-bar">
-          <div class="search-box">
-            <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-            <input type="text" id="searchInput" class="search-input" placeholder="Search schedules...">
+            <!-- Review Classes Grid -->
+            <div class="card">
+              <div class="card-header-bar mb-3">
+                <h3 class="card-title">Schedule Review</h3>
+                <div class="filter-controls-row">
+                  <input type="text" id="reviewSearch" class="form-input form-input-sm" placeholder="Filter teacher or account...">
+                  <select id="reviewClassType" class="form-select form-select-sm">
+                    <option value="">All Class Types</option>
+                    <option value="Adult">Adult</option>
+                    <option value="Teens">Teens</option>
+                    <option value="Speak+">Speak+</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="table-responsive">
+                <table class="data-table" id="reviewTable">
+                  <thead>
+                    <tr>
+                      <th>Time (CET)</th>
+                      <th>End Time</th>
+                      <th>Teacher Name</th>
+                      <th>Account</th>
+                      <th>VTC</th>
+                      <th>Class Type</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="reviewTableBody">
+                    <!-- Populated dynamically -->
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="pagination-bar" id="reviewPagination">
+                <span id="reviewPageInfo" class="text-muted">Showing 0 of 0 classes</span>
+                <div class="btn-group">
+                  <button class="btn btn-secondary btn-sm" id="btnPrevPage">Previous</button>
+                  <button class="btn btn-secondary btn-sm" id="btnNextPage">Next</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- ================================================================
+             VIEW 2: TEACHERS & QUALIFICATIONS
+             ================================================================ -->
+        <section id="teachersView" class="view-panel">
+          <div class="content-header">
+            <div>
+              <h1 class="page-title">Teachers &amp; Skills</h1>
+              <p class="page-subtitle">Manage teacher logins, VTC codes, and eligibility for Teen and Speak+ classes.</p>
+            </div>
+            <button class="btn btn-primary" id="btnOpenAddTeacher">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              Add Teacher
+            </button>
           </div>
 
-          <div class="filter-group">
-            <button class="filter-btn active" data-filter="all">All</button>
-            <button class="filter-btn" data-filter="active">Active</button>
-            <button class="filter-btn" data-filter="paused">Paused</button>
-            <button class="filter-btn" data-filter="high">High Priority</button>
-          </div>
-        </div>
+          <div class="controls-bar mb-3">
+            <div class="search-box">
+              <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input type="text" id="teacherSearchInput" class="search-input" placeholder="Search teacher by name or login...">
+            </div>
 
-        <!-- Task List Container -->
-        <div class="task-list" id="taskList">
-          <!-- Dynamically populated by JavaScript -->
-        </div>
+            <div class="filter-group">
+              <button class="filter-btn active" data-tfilter="all">All</button>
+              <button class="filter-btn" data-tfilter="teens">Teens List</button>
+              <button class="filter-btn" data-tfilter="speak_plus">Speak+ List</button>
+              <button class="filter-btn" data-tfilter="active">Active Only</button>
+            </div>
+          </div>
+
+          <div class="card p-0">
+            <div class="table-responsive">
+              <table class="data-table" id="teachersTable">
+                <thead>
+                  <tr>
+                    <th>Teacher Name</th>
+                    <th>Account / Login</th>
+                    <th>VTC Code</th>
+                    <th>Shift</th>
+                    <th>Day Off</th>
+                    <th>Weekend</th>
+                    <th>Teens</th>
+                    <th>Speak+</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="teachersTableBody">
+                  <!-- Loaded via API -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- ================================================================
+             VIEW 3: SHIFTS & OFF DAYS
+             ================================================================ -->
+        <section id="shiftsView" class="view-panel">
+          <div class="content-header">
+            <div>
+              <h1 class="page-title">Shifts &amp; Roster Patterns</h1>
+              <p class="page-subtitle">Configure shift working windows and view weekend group rotations.</p>
+            </div>
+          </div>
+
+          <!-- Shifts Grid -->
+          <div class="stats-grid mb-4" id="shiftsCardsGrid">
+            <!-- Loaded via API -->
+          </div>
+
+          <div class="card">
+            <h3 class="card-title mb-2">Alternate Weekend Rotation Logic</h3>
+            <p class="text-secondary mb-3">
+              Teachers are assigned to either <strong>Weekend Group A</strong> or <strong>Weekend Group B</strong>.
+              The scheduler enforces alternating weekends based on the calendar week number:
+            </p>
+            <ul style="padding-left: 20px; line-height: 1.8; color: var(--text-secondary);">
+              <li><strong>Even Calendar Weeks</strong>: Group A is OFF; Group B works Saturday &amp; Sunday.</li>
+              <li><strong>Odd Calendar Weeks</strong>: Group B is OFF; Group A works Saturday &amp; Sunday.</li>
+              <li>Weekend status is strictly calendar-based and does not change if a teacher takes ad-hoc leave or sick days.</li>
+            </ul>
+          </div>
+        </section>
+
+
+        <!-- ================================================================
+             VIEW 4: SCHEDULE ADJUSTMENTS
+             ================================================================ -->
+        <section id="adjustmentsView" class="view-panel">
+          <div class="content-header">
+            <div>
+              <h1 class="page-title">Teacher Schedule Adjustments</h1>
+              <p class="page-subtitle">Capture constraints, childcare blocks, time window limits, and ad-hoc unavailable days.</p>
+            </div>
+            <button class="btn btn-primary" id="btnOpenAddAdjustment">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              Add Adjustment
+            </button>
+          </div>
+
+          <div class="card p-0">
+            <div class="table-responsive">
+              <table class="data-table" id="adjustmentsTable">
+                <thead>
+                  <tr>
+                    <th>Teacher</th>
+                    <th>Adjustment Type</th>
+                    <th>Constraint Value</th>
+                    <th>Applies On</th>
+                    <th>Effective Dates</th>
+                    <th>Reason / Notes</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="adjustmentsTableBody">
+                  <!-- Loaded via API -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
       </main>
     </div>
   </div>
 
-  <!-- Add Task Modal -->
-  <div class="modal-backdrop" id="taskModal">
+  <!-- ====================================================================
+       MODAL: ADD / EDIT TEACHER
+       ==================================================================== -->
+  <div class="modal-backdrop" id="teacherModal">
     <div class="modal-dialog">
       <div class="modal-header">
-        <h3 class="modal-title">New Scheduled Task</h3>
-        <button class="btn btn-icon" id="closeModalBtn" title="Close">
+        <h3 class="modal-title" id="teacherModalTitle">Add New Teacher</h3>
+        <button class="btn btn-icon" id="btnCloseTeacherModal">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
         </button>
       </div>
+      <form id="teacherForm">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="tAccount">Account / Login</label>
+              <input type="text" id="tAccount" class="form-input" placeholder="e.g. 1234.goc.jd1" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="tName">Full Name</label>
+              <input type="text" id="tName" class="form-input" placeholder="e.g. Jane Doe" required>
+            </div>
+          </div>
 
-      <form id="taskForm">
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="tVtc">VTC Code</label>
+              <input type="text" id="tVtc" class="form-input" placeholder="e.g. vtc1234">
+            </div>
+            <div class="form-group flex-1">
+              <label for="tStatus">Account Status</label>
+              <select id="tStatus" class="form-select">
+                <option value="active">Active Teacher</option>
+                <option value="placeholder">Placeholder / TBA</option>
+                <option value="resigned">Resigned (Hidden = Yes)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="tShift">Shift</label>
+              <select id="tShift" class="form-select">
+                <option value="day">Day Shift (07:00 - 19:00)</option>
+                <option value="evening">Evening Shift (13:00 - 01:00)</option>
+                <option value="latam">Latam (21:00 - 09:00)</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label for="tDayOff">Fixed Weekly Day Off</label>
+              <select id="tDayOff" class="form-select">
+                <option value="Monday">Monday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Saturday">Saturday</option>
+                <option value="Sunday">Sunday</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label for="tWeekendGroup">Weekend Group</label>
+              <select id="tWeekendGroup" class="form-select">
+                <option value="A">Group A (Even Wk Off)</option>
+                <option value="B">Group B (Odd Wk Off)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Class Qualifications</label>
+            <div style="display: flex; gap: 20px; padding-top: 4px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="tTeens" style="width: 16px; height: 16px;">
+                <span>Teens Qualified (1 Hour)</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="tSpeakPlus" style="width: 16px; height: 16px;">
+                <span>Speak+ Qualified (30 Mins)</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btnCancelTeacherModal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Teacher</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ====================================================================
+       MODAL: ADD SCHEDULE ADJUSTMENT
+       ==================================================================== -->
+  <div class="modal-backdrop" id="adjModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">New Schedule Adjustment</h3>
+        <button class="btn btn-icon" id="btnCloseAdjModal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <form id="adjForm">
         <div class="modal-body">
           <div class="form-group">
-            <label for="taskTitle">Task Name</label>
-            <input type="text" id="taskTitle" class="form-input" placeholder="e.g. Sync Database Backup" required>
-          </div>
-
-          <div class="form-group">
-            <label for="taskSchedule">Schedule / Frequency</label>
-            <input type="text" id="taskSchedule" class="form-input" placeholder="e.g. Every hour, 0 8 * * *, or 14:00 daily" required>
-            <span class="form-hint">Standard cron expression or human-friendly interval</span>
-          </div>
-
-          <div class="form-group">
-            <label for="taskPriority">Priority</label>
-            <select id="taskPriority" class="form-select">
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="low">Low</option>
+            <label for="adjTeacherSelect">Teacher</label>
+            <select id="adjTeacherSelect" class="form-select" required>
+              <!-- Populated dynamically -->
             </select>
           </div>
 
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="adjType">Adjustment Type</label>
+              <select id="adjType" class="form-select" required>
+                <option value="block_slot">Block Specific Slot (e.g. Childcare 14:00)</option>
+                <option value="no_before">No Classes Before (Earliest Start)</option>
+                <option value="no_after">No Classes After (Latest Finish)</option>
+                <option value="unavailable_day">Unavailable Day (Full Day Off)</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label for="adjTimeVal">Time Constraint (CET)</label>
+              <input type="text" id="adjTimeVal" class="form-input" placeholder="e.g. 14:00 or 14:00-15:00">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="adjDayOfWeek">Day of Week</label>
+              <select id="adjDayOfWeek" class="form-select">
+                <option value="all">Every Day in Period</option>
+                <option value="Monday">Monday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Saturday">Saturday</option>
+                <option value="Sunday">Sunday</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label for="adjStartDate">Effective From (Start Date)</label>
+              <input type="date" id="adjStartDate" class="form-input" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="adjEndDate">Effective Until (Optional)</label>
+              <input type="date" id="adjEndDate" class="form-input">
+              <span class="form-hint">Leave blank if ongoing</span>
+            </div>
+          </div>
+
           <div class="form-group">
-            <label for="taskDesc">Description (Optional)</label>
-            <textarea id="taskDesc" class="form-textarea" rows="2" placeholder="Brief notes about what this task does"></textarea>
+            <label for="adjReason">Reason / Notes</label>
+            <input type="text" id="adjReason" class="form-input" placeholder="e.g. Childcare pickup at 14:00, doctor appointment, etc.">
           </div>
         </div>
-
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" id="cancelModalBtn">Cancel</button>
-          <button type="submit" class="btn btn-primary">Create Schedule</button>
+          <button type="button" class="btn btn-secondary" id="btnCancelAdjModal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Adjustment</button>
         </div>
       </form>
     </div>

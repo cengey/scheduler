@@ -29,12 +29,21 @@ const themeToggleBtn = document.getElementById('themeToggleBtn');
 const themeIconSun = document.getElementById('themeIconSun');
 const themeIconMoon = document.getElementById('themeIconMoon');
 
+// Server start time (client clock), derived from a single health check.
+// Uptime is then ticked locally so we don't need to poll the backend.
+let serverStartedAt = null;
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
-  fetchHealth();
+  fetchHealth(); // One-time check on load
   fetchTasks();
-  setInterval(fetchHealth, 5000); // Check backend health every 5s
+  setInterval(renderUptime, 1000); // Local tick only, no network request
+
+  // Re-check only when the user returns to the window (e.g. server may have restarted)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') fetchHealth();
+  });
 
   setupEventListeners();
 });
@@ -134,19 +143,15 @@ function showToast(message, type = 'info') {
   }, 2600);
 }
 
-// Fetch Backend Health & Update Status Badge
+// Fetch Backend Health & Update Status Badge (called on load / window refocus only)
 async function fetchHealth() {
   try {
     const res = await fetch(`${API_BASE}/health`);
     if (res.ok) {
       const data = await res.json();
-      statusBadgeEl.style.color = 'var(--success)';
-      statusBadgeEl.style.backgroundColor = 'var(--success-tint)';
-      statusBadgeEl.style.borderColor = 'var(--success-border)';
-      statusTextEl.textContent = `Backend: Connected (Uptime ${data.uptime_seconds}s)`;
-      if (statUptimeEl) {
-        statUptimeEl.textContent = `${data.uptime_seconds}s`;
-      }
+      serverStartedAt = Date.now() - data.uptime_seconds * 1000;
+      markConnected();
+      renderUptime();
     } else {
       markDisconnected();
     }
@@ -155,7 +160,32 @@ async function fetchHealth() {
   }
 }
 
+function formatUptime(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+// Purely client-side: no network request
+function renderUptime() {
+  if (serverStartedAt === null || !statUptimeEl) return;
+  const seconds = Math.max(0, Math.floor((Date.now() - serverStartedAt) / 1000));
+  statUptimeEl.textContent = formatUptime(seconds);
+}
+
+function markConnected() {
+  statusBadgeEl.style.color = 'var(--success)';
+  statusBadgeEl.style.backgroundColor = 'var(--success-tint)';
+  statusBadgeEl.style.borderColor = 'var(--success-border)';
+  statusTextEl.textContent = 'Backend: Connected';
+}
+
 function markDisconnected() {
+  serverStartedAt = null;
+  if (statUptimeEl) statUptimeEl.textContent = '-';
   statusBadgeEl.style.color = 'var(--danger)';
   statusBadgeEl.style.backgroundColor = 'var(--danger-tint)';
   statusBadgeEl.style.borderColor = 'var(--danger-border)';
@@ -171,6 +201,8 @@ async function fetchTasks() {
       renderTasks();
     }
   } catch (err) {
+    // A real request failing is the signal that the backend is down
+    markDisconnected();
     console.error('Failed to load tasks', err);
   }
 }

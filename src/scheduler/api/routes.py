@@ -7,14 +7,15 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Response
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from scheduler.db import get_connection
 from scheduler.excel_io import (
     parse_distribution_workbook,
     parse_schedule_file,
+    parse_hub_teacher_list,
     export_schedule_to_excel,
+    export_teachers_to_excel,
 )
 from scheduler.engine import generate_revised_schedule
 
@@ -31,7 +32,7 @@ def get_health():
     return {
         "status": "healthy",
         "app": "Scheduler Desktop",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "uptime_seconds": uptime_seconds,
         "timestamp": datetime.now().isoformat(),
     }
@@ -44,11 +45,13 @@ class TeacherCreate(BaseModel):
     account: str = Field(..., min_length=1)
     name: str = Field(..., min_length=1)
     vtc: str = ""
+    email: str = ""
     status: str = "active"
     teens_qualified: bool = False
     speak_plus_qualified: bool = False
     shift_id: str = "day"
-    fixed_day_off: str = "Sunday"
+    rotation_id: str = "rot-1"
+    fixed_day_off: str = "Thursday"
     weekend_group: str = "A"
     notes: str = ""
 
@@ -56,10 +59,12 @@ class TeacherCreate(BaseModel):
 class TeacherUpdate(BaseModel):
     name: Optional[str] = None
     vtc: Optional[str] = None
+    email: Optional[str] = None
     status: Optional[str] = None
     teens_qualified: Optional[bool] = None
     speak_plus_qualified: Optional[bool] = None
     shift_id: Optional[str] = None
+    rotation_id: Optional[str] = None
     fixed_day_off: Optional[str] = None
     weekend_group: Optional[str] = None
     notes: Optional[str] = None
@@ -90,9 +95,9 @@ def list_teachers(
             params.append(shift)
 
         if search:
-            query += " AND (name LIKE ? OR account LIKE ? OR vtc LIKE ?)"
+            query += " AND (name LIKE ? OR account LIKE ? OR vtc LIKE ? OR email LIKE ?)"
             term = f"%{search.strip()}%"
-            params.extend([term, term, term])
+            params.extend([term, term, term, term])
 
         query += " ORDER BY name ASC"
         rows = conn.execute(query, params).fetchall()
@@ -106,16 +111,18 @@ def create_teacher(data: TeacherCreate):
         try:
             conn.execute("""
                 INSERT INTO teachers
-                (account, name, vtc, status, teens_qualified, speak_plus_qualified, shift_id, fixed_day_off, weekend_group, notes, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (account, name, vtc, email, status, teens_qualified, speak_plus_qualified, shift_id, rotation_id, fixed_day_off, weekend_group, notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 data.account.strip(),
                 data.name.strip(),
                 data.vtc.strip(),
+                data.email.strip(),
                 data.status,
                 1 if data.teens_qualified else 0,
                 1 if data.speak_plus_qualified else 0,
                 data.shift_id,
+                data.rotation_id,
                 data.fixed_day_off,
                 data.weekend_group,
                 data.notes,
@@ -165,8 +172,61 @@ def delete_teacher(account: str):
         return {"success": True, "account": account}
 
 
+@router.post("/teachers/upload")
+async def upload_teacher_list(file: UploadFile = File(...)):
+    """Upload Hub Teacher List.xlsx to add or update master teachers."""
+    try:
+        content = await file.read()
+        parsed_teachers = parse_hub_teacher_list(content)
+        if not parsed_teachers:
+            raise HTTPException(status_code=400, detail="No valid teacher records found in file")
+
+        now_str = datetime.now().isoformat()
+        with get_connection() as conn:
+            for t in parsed_teachers:
+                # Upsert teacher
+                conn.execute("""
+                    INSERT INTO teachers (account, name, vtc, email, status, teens_qualified, speak_plus_qualified, shift_id, rotation_id, fixed_day_off, weekend_group, notes, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 0, 0, 'day', 'rot-1', 'Thursday', 'A', 'Imported from Hub List', ?, ?)
+                    ON CONFLICT(account) DO UPDATE SET
+                        name = excluded.name,
+                        vtc = CASE WHEN excluded.vtc != '' THEN excluded.vtc ELSE teachers.vtc END,
+                        email = CASE WHEN excluded.email != '' THEN excluded.email ELSE teachers.email END,
+                        status = excluded.status,
+                        updated_at = excluded.updated_at
+                """, (
+                    t["account"],
+                    t["name"],
+                    t.get("vtc", ""),
+                    t.get("email", ""),
+                    t.get("status", "active"),
+                    now_str,
+                    now_str,
+                ))
+            conn.commit()
+
+        return {"success": True, "imported_count": len(parsed_teachers)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to import teachers: {str(e)}")
+
+
+@router.get("/teachers/export")
+def export_teachers_endpoint():
+    """Download the full master teacher roster as an Excel file."""
+    with get_connection() as conn:
+        rows = conn.execute("SELECT * FROM teachers ORDER BY name ASC").fetchall()
+        teachers = [dict(r) for r in rows]
+
+    excel_bytes = export_teachers_to_excel(teachers)
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="Teacher_Roster.xlsx"'},
+    )
+
+
 # ==============================================================================
-# Shifts
+# Shifts & Rotation Groups
 # ==============================================================================
 @router.get("/shifts")
 def list_shifts():
@@ -198,6 +258,77 @@ def update_shift(shift_id: str, data: ShiftUpdate):
         if not row:
             raise HTTPException(status_code=404, detail="Shift not found")
         return dict(row)
+
+
+class RotationGroupCreate(BaseModel):
+    id: Optional[str] = None
+    name: str
+    shift_id: str = "day"
+    fixed_day_off: str = "Thursday"
+    week1_weekend_off: bool = True
+    week2_weekend_off: bool = False
+    description: str = ""
+
+
+@router.get("/rotation-groups")
+def list_rotation_groups():
+    with get_connection() as conn:
+        rows = conn.execute("""
+            SELECT r.*, s.name as shift_name, s.start_time, s.end_time,
+                   (SELECT COUNT(*) FROM teachers t WHERE t.rotation_id = r.id) as teacher_count
+            FROM shift_rotations r
+            LEFT JOIN shifts s ON r.shift_id = s.id
+            ORDER BY r.id ASC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+
+@router.post("/rotation-groups", status_code=201)
+def create_rotation_group(data: RotationGroupCreate):
+    rot_id = data.id or f"rot-{uuid4().hex[:6]}"
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT INTO shift_rotations (id, name, shift_id, fixed_day_off, week1_weekend_off, week2_weekend_off, description)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            rot_id,
+            data.name,
+            data.shift_id,
+            data.fixed_day_off,
+            1 if data.week1_weekend_off else 0,
+            1 if data.week2_weekend_off else 0,
+            data.description,
+        ))
+        conn.commit()
+        return {"id": rot_id, "success": True}
+
+
+@router.put("/rotation-groups/{rot_id}")
+def update_rotation_group(rot_id: str, data: RotationGroupCreate):
+    with get_connection() as conn:
+        conn.execute("""
+            UPDATE shift_rotations
+            SET name = ?, shift_id = ?, fixed_day_off = ?, week1_weekend_off = ?, week2_weekend_off = ?, description = ?
+            WHERE id = ?
+        """, (
+            data.name,
+            data.shift_id,
+            data.fixed_day_off,
+            1 if data.week1_weekend_off else 0,
+            1 if data.week2_weekend_off else 0,
+            data.description,
+            rot_id,
+        ))
+        conn.commit()
+        return {"id": rot_id, "success": True}
+
+
+@router.delete("/rotation-groups/{rot_id}")
+def delete_rotation_group(rot_id: str):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM shift_rotations WHERE id = ?", (rot_id,))
+        conn.commit()
+        return {"id": rot_id, "success": True}
 
 
 # ==============================================================================
@@ -283,6 +414,7 @@ async def generate_schedule_endpoint(
     file_3: UploadFile = File(...),
     file_schedule: UploadFile = File(...),
     allow_7h_override: bool = Form(False),
+    allow_4h_continuous_override: bool = Form(False),
 ):
     """Run the delta scheduling engine on the uploaded distribution and schedule files."""
     try:
@@ -320,6 +452,7 @@ async def generate_schedule_endpoint(
             shifts=shifts,
             adjustments=adjustments,
             allow_7h_override=allow_7h_override,
+            allow_4h_continuous_override=allow_4h_continuous_override,
         )
 
         # Save generated schedule into database
@@ -431,7 +564,6 @@ def get_schedule_classes(
             term = f"%{search.strip()}%"
             params.extend([term, term])
 
-        # Total matching
         count_query = query.replace("SELECT *", "SELECT COUNT(*)")
         total = conn.execute(count_query, params).fetchone()[0]
 

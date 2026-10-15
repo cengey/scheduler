@@ -5,10 +5,14 @@ const API_BASE = '/api';
 // State
 let teachers = [];
 let adjustments = [];
+let shiftRotations = [];
 let currentScheduleId = null;
 let reviewPage = 0;
 const reviewPageSize = 25;
 let serverStartedAt = null;
+
+let currentTeacherTab = 'all';
+let teacherSearchQuery = '';
 
 // DOM Elements
 const statusBadgeEl = document.getElementById('statusBadge');
@@ -54,11 +58,12 @@ function setupNavigation() {
 
       // Refresh view-specific data
       if (targetViewId === 'teachersView') fetchTeachers();
-      if (targetViewId === 'shiftsView') fetchShifts();
+      if (targetViewId === 'shiftsView') fetchShiftsAndRotations();
       if (targetViewId === 'adjustmentsView') fetchAdjustments();
     });
   });
 }
+
 
 // ==============================================================================
 // View 1: Schedule Generator & Review
@@ -120,6 +125,7 @@ function setupGeneratorView() {
     formData.append('file_3', document.getElementById('file3').files[0]);
     formData.append('file_schedule', document.getElementById('fileSchedule').files[0]);
     formData.append('allow_7h_override', document.getElementById('allow7hOverride').checked ? 'true' : 'false');
+    formData.append('allow_4h_continuous_override', document.getElementById('allow4hContinuousOverride').checked ? 'true' : 'false');
 
     try {
       const res = await fetch(`${API_BASE}/generate-schedule`, {
@@ -249,7 +255,7 @@ function renderReviewTable(items, total, offset) {
         <td style="color: var(--text-muted);">${escapeHtml(c.end_time)}</td>
         <td>
           <strong>${escapeHtml(c.name)}</strong>
-          ${c.hidden === 'Yes' ? '<span class="badge badge-priority-high ml-1">Hidden</span>' : ''}
+          ${c.hidden === 'Yes' ? '<span class="badge badge-priority-high" style="margin-left: 6px;">Hidden</span>' : ''}
         </td>
         <td><code>${escapeHtml(c.account)}</code></td>
         <td>${escapeHtml(c.vtc || '-')}</td>
@@ -268,9 +274,6 @@ function renderReviewTable(items, total, offset) {
 // ==============================================================================
 // View 2: Teachers & Qualifications
 // ==============================================================================
-let currentTeacherFilter = 'all';
-let teacherSearchQuery = '';
-
 function setupTeachersView() {
   const searchInput = document.getElementById('teacherSearchInput');
   const filterBtns = document.querySelectorAll('[data-tfilter]');
@@ -279,6 +282,8 @@ function setupTeachersView() {
   const btnClose = document.getElementById('btnCloseTeacherModal');
   const btnCancel = document.getElementById('btnCancelTeacherModal');
   const form = document.getElementById('teacherForm');
+  const hubFileInput = document.getElementById('hubTeacherFileInput');
+  const btnQuickAddSkill = document.getElementById('btnQuickAddSkill');
 
   searchInput.addEventListener('input', (e) => {
     teacherSearchQuery = e.target.value.toLowerCase().trim();
@@ -289,9 +294,49 @@ function setupTeachersView() {
     btn.addEventListener('click', () => {
       filterBtns.forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      currentTeacherFilter = btn.dataset.tfilter;
+      currentTeacherTab = btn.dataset.tfilter;
+      updateSkillSectionView();
       renderTeachersTable();
     });
+  });
+
+  // Hub Teacher List Upload
+  hubFileInput.addEventListener('change', async () => {
+    if (!hubFileInput.files || hubFileInput.files.length === 0) return;
+    const file = hubFileInput.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+
+    showToast('Uploading teacher list...');
+    try {
+      const res = await fetch(`${API_BASE}/teachers/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`Imported ${data.imported_count} teachers successfully!`);
+        fetchTeachers();
+      } else {
+        const err = await res.json();
+        alert(`Error: ${err.detail || 'Failed to upload teacher list'}`);
+      }
+    } catch (e) {
+      alert(`Error uploading file: ${e.message}`);
+    } finally {
+      hubFileInput.value = '';
+    }
+  });
+
+  // Quick Add Teacher to Skill list
+  btnQuickAddSkill.addEventListener('click', async () => {
+    const sel = document.getElementById('quickSkillTeacherSelect');
+    const account = sel.value;
+    if (!account) return;
+
+    const field = currentTeacherTab === 'teens' ? 'teens_qualified' : 'speak_plus_qualified';
+    await toggleQualification(account, field, true);
+    fetchTeachers();
   });
 
   btnOpen.addEventListener('click', () => {
@@ -311,10 +356,12 @@ function setupTeachersView() {
       account: document.getElementById('tAccount').value.trim(),
       name: document.getElementById('tName').value.trim(),
       vtc: document.getElementById('tVtc').value.trim(),
+      email: document.getElementById('tEmail').value.trim(),
       status: document.getElementById('tStatus').value,
       shift_id: document.getElementById('tShift').value,
-      fixed_day_off: document.getElementById('tDayOff').value,
-      weekend_group: document.getElementById('tWeekendGroup').value,
+      rotation_id: document.getElementById('tRotation').value,
+      fixed_day_off: 'Thursday',
+      weekend_group: 'A',
       teens_qualified: document.getElementById('tTeens').checked,
       speak_plus_qualified: document.getElementById('tSpeakPlus').checked,
     };
@@ -347,6 +394,8 @@ async function fetchTeachers() {
     const res = await fetch(`${API_BASE}/teachers`);
     if (res.ok) {
       teachers = await res.json();
+      updateTeacherCounts();
+      updateSkillSectionView();
       renderTeachersTable();
       populateTeacherDropdowns();
     }
@@ -355,14 +404,47 @@ async function fetchTeachers() {
   }
 }
 
+function updateTeacherCounts() {
+  const total = teachers.length;
+  const teens = teachers.filter((t) => t.teens_qualified).length;
+  const speak = teachers.filter((t) => t.speak_plus_qualified).length;
+
+  document.getElementById('countAllTeachers').textContent = total;
+  document.getElementById('countTeensTeachers').textContent = teens;
+  document.getElementById('countSpeakTeachers').textContent = speak;
+}
+
+function updateSkillSectionView() {
+  const sec = document.getElementById('quickSkillAddSection');
+  const title = document.getElementById('quickSkillTitle');
+  const desc = document.getElementById('quickSkillDesc');
+  const sel = document.getElementById('quickSkillTeacherSelect');
+
+  if (currentTeacherTab === 'teens') {
+    sec.style.display = 'block';
+    title.textContent = 'Add Teacher to Teens Qualification List';
+    desc.textContent = 'Select any teacher below to authorize them for 1-hour Teen classes.';
+    const candidates = teachers.filter((t) => !t.teens_qualified);
+    sel.innerHTML = candidates.map((t) => `<option value="${t.account}">${escapeHtml(t.name)} (${t.account})</option>`).join('');
+  } else if (currentTeacherTab === 'speak_plus') {
+    sec.style.display = 'block';
+    title.textContent = 'Add Teacher to Speak+ Qualification List';
+    desc.textContent = 'Select any teacher below to authorize them for 30-minute Speak+ classes.';
+    const candidates = teachers.filter((t) => !t.speak_plus_qualified);
+    sel.innerHTML = candidates.map((t) => `<option value="${t.account}">${escapeHtml(t.name)} (${t.account})</option>`).join('');
+  } else {
+    sec.style.display = 'none';
+  }
+}
+
 function renderTeachersTable() {
   const tbody = document.getElementById('teachersTableBody');
   if (!tbody) return;
 
   const filtered = teachers.filter((t) => {
-    if (currentTeacherFilter === 'teens' && !t.teens_qualified) return false;
-    if (currentTeacherFilter === 'speak_plus' && !t.speak_plus_qualified) return false;
-    if (currentTeacherFilter === 'active' && t.status !== 'active') return false;
+    if (currentTeacherTab === 'teens' && !t.teens_qualified) return false;
+    if (currentTeacherTab === 'speak_plus' && !t.speak_plus_qualified) return false;
+    if (currentTeacherTab === 'placeholder' && t.status !== 'placeholder') return false;
 
     if (teacherSearchQuery) {
       const nameMatch = (t.name || '').toLowerCase().includes(teacherSearchQuery);
@@ -377,45 +459,50 @@ function renderTeachersTable() {
     tbody.innerHTML = `
       <tr>
         <td colspan="10" style="text-align: center; padding: 36px; color: var(--text-muted);">
-          No teachers found.
+          No teachers found matching criteria.
         </td>
       </tr>
     `;
     return;
   }
 
-  tbody.innerHTML = filtered.map((t) => `
-    <tr>
-      <td><strong>${escapeHtml(t.name)}</strong></td>
-      <td><code>${escapeHtml(t.account)}</code></td>
-      <td>${escapeHtml(t.vtc || '-')}</td>
-      <td><span class="badge badge-priority-low">${escapeHtml(t.shift_id.toUpperCase())}</span></td>
-      <td>${escapeHtml(t.fixed_day_off)}</td>
-      <td><span class="badge badge-priority-medium">Group ${escapeHtml(t.weekend_group)}</span></td>
-      <td>
-        <button class="btn btn-sm ${t.teens_qualified ? 'btn-primary' : 'btn-secondary'}"
-                onclick="toggleQualification('${t.account}', 'teens_qualified', ${!t.teens_qualified})">
-          ${t.teens_qualified ? 'Teens Yes' : 'No'}
-        </button>
-      </td>
-      <td>
-        <button class="btn btn-sm ${t.speak_plus_qualified ? 'btn-primary' : 'btn-secondary'}"
-                onclick="toggleQualification('${t.account}', 'speak_plus_qualified', ${!t.speak_plus_qualified})">
-          ${t.speak_plus_qualified ? 'Speak+ Yes' : 'No'}
-        </button>
-      </td>
-      <td>
-        <span class="badge badge-status-${t.status === 'active' ? 'active' : 'paused'}">
-          ${escapeHtml(t.status.toUpperCase())}
-        </span>
-      </td>
-      <td>
-        <button class="btn btn-sm btn-danger-ghost" onclick="deleteTeacher('${t.account}')" title="Delete Teacher">
-          Delete
-        </button>
-      </td>
-    </tr>
-  `).join('');
+  tbody.innerHTML = filtered.map((t) => {
+    const isTeensTab = currentTeacherTab === 'teens';
+    const isSpeakTab = currentTeacherTab === 'speak_plus';
+
+    return `
+      <tr>
+        <td><strong>${escapeHtml(t.name)}</strong></td>
+        <td><code>${escapeHtml(t.account)}</code></td>
+        <td>${escapeHtml(t.vtc || '-')}</td>
+        <td><span class="badge badge-priority-low">${escapeHtml(t.shift_id.toUpperCase())}</span></td>
+        <td><span class="badge badge-priority-medium">${escapeHtml(t.rotation_id ? t.rotation_id.toUpperCase() : 'ROT-1')}</span></td>
+        <td>${escapeHtml(t.fixed_day_off || 'Thu')}</td>
+        <td>
+          ${isTeensTab
+            ? `<button class="btn btn-sm btn-danger-ghost" onclick="toggleQualification('${t.account}', 'teens_qualified', false)">Remove</button>`
+            : `<button class="btn btn-sm ${t.teens_qualified ? 'btn-primary' : 'btn-secondary'}" onclick="toggleQualification('${t.account}', 'teens_qualified', ${!t.teens_qualified})">${t.teens_qualified ? 'Yes' : 'No'}</button>`
+          }
+        </td>
+        <td>
+          ${isSpeakTab
+            ? `<button class="btn btn-sm btn-danger-ghost" onclick="toggleQualification('${t.account}', 'speak_plus_qualified', false)">Remove</button>`
+            : `<button class="btn btn-sm ${t.speak_plus_qualified ? 'btn-primary' : 'btn-secondary'}" onclick="toggleQualification('${t.account}', 'speak_plus_qualified', ${!t.speak_plus_qualified})">${t.speak_plus_qualified ? 'Yes' : 'No'}</button>`
+          }
+        </td>
+        <td>
+          <span class="badge badge-status-${t.status === 'active' ? 'active' : 'paused'}">
+            ${escapeHtml(t.status.toUpperCase())}
+          </span>
+        </td>
+        <td>
+          <button class="btn btn-sm btn-danger-ghost" onclick="deleteTeacher('${t.account}')" title="Delete Teacher">
+            Delete
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
 }
 
 window.toggleQualification = async function(account, field, value) {
@@ -457,17 +544,25 @@ function populateTeacherDropdowns() {
 
 
 // ==============================================================================
-// View 3: Shifts & Off Days
+// View 3: Shifts & Off Days (from Shift Rotation List)
 // ==============================================================================
-async function fetchShifts() {
+async function fetchShiftsAndRotations() {
   try {
-    const res = await fetch(`${API_BASE}/shifts`);
-    if (res.ok) {
-      const shifts = await res.json();
+    const [shiftsRes, rotsRes] = await Promise.all([
+      fetch(`${API_BASE}/shifts`),
+      fetch(`${API_BASE}/rotation-groups`),
+    ]);
+
+    if (shiftsRes.ok) {
+      const shifts = await shiftsRes.json();
       renderShiftsCards(shifts);
     }
+    if (rotsRes.ok) {
+      shiftRotations = await rotsRes.json();
+      renderRotationsList(shiftRotations);
+    }
   } catch (err) {
-    console.error('Failed to load shifts', err);
+    console.error('Failed to load shifts and rotations', err);
   }
 }
 
@@ -484,10 +579,79 @@ function renderShiftsCards(shifts) {
       <div class="stat-value" style="font-size: 20px; margin-top: 10px;">
         ${escapeHtml(s.start_time)} – ${escapeHtml(s.end_time)}
       </div>
-      <span class="stat-sub">${escapeHtml(s.description || 'Configured working window')}</span>
+      <span class="stat-sub">${escapeHtml(s.description || 'Configured shift window')}</span>
     </div>
   `).join('');
 }
+
+function renderRotationsList(rotations) {
+  const container = document.getElementById('rotationsListContainer');
+  if (!container) return;
+
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const fullDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  container.innerHTML = rotations.map((r, idx) => {
+    const offDay = r.fixed_day_off || 'Thursday';
+
+    // Week 1 cells
+    const w1Cells = days.map((d, i) => {
+      const isOff = fullDays[i].toLowerCase() === offDay.toLowerCase() || (r.week1_weekend_off && (d === 'Sat' || d === 'Sun'));
+      return `<td class="${isOff ? 'rotation-cell-off' : 'rotation-cell-shifted'}">${isOff ? 'OFF' : 'Shifted'}</td>`;
+    }).join('');
+
+    // Week 2 cells
+    const w2Cells = days.map((d, i) => {
+      const isOff = fullDays[i].toLowerCase() === offDay.toLowerCase() || (r.week2_weekend_off && (d === 'Sat' || d === 'Sun'));
+      return `<td class="${isOff ? 'rotation-cell-off' : 'rotation-cell-shifted'}">${isOff ? 'OFF' : 'Shifted'}</td>`;
+    }).join('');
+
+    return `
+      <div class="rotation-card">
+        <div class="rotation-card-header">
+          <div>
+            <strong style="font-size: 15px;">${escapeHtml(r.name)}</strong>
+            <span class="badge badge-priority-low" style="margin-left: 8px;">${escapeHtml((r.shift_id || 'day').toUpperCase())}</span>
+            <span class="text-muted" style="font-size: 12px; margin-left: 8px;">Fixed Off: <strong>${escapeHtml(r.fixed_day_off)}</strong></span>
+          </div>
+          <span class="text-muted" style="font-size: 12px;">${r.teacher_count || 0} Teachers Assigned</span>
+        </div>
+
+        <div class="table-responsive">
+          <table class="rotation-grid-table">
+            <thead>
+              <tr>
+                <th colspan="7" class="week-header">Week 1</th>
+                <th colspan="7" class="week-header">Week 2</th>
+                <th rowspan="2" style="background-color: var(--border-subtle); vertical-align: middle;">Cycle</th>
+              </tr>
+              <tr>
+                ${days.map((d) => `<th style="width: 6.5%;">${d}</th>`).join('')}
+                ${days.map((d) => `<th style="width: 6.5%;">${d}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                ${w1Cells}
+                ${w2Cells}
+                <td style="font-size: 11px; color: var(--text-muted); font-weight: 500;">Repeats from Wk 1</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+window.openAddRotationModal = function() {
+  document.getElementById('rotationForm').reset();
+  document.getElementById('rotationModal').classList.add('show');
+};
+
+window.closeAddRotationModal = function() {
+  document.getElementById('rotationModal').classList.remove('show');
+};
 
 
 // ==============================================================================
@@ -495,20 +659,22 @@ function renderShiftsCards(shifts) {
 // ==============================================================================
 function setupAdjustmentsView() {
   const modal = document.getElementById('adjModal');
-  const btnOpen = document.getElementById('btnOpenAddAdjustment');
-  const btnClose = document.getElementById('btnCloseAdjModal');
-  const btnCancel = document.getElementById('btnCancelAdjModal');
   const form = document.getElementById('adjForm');
 
-  btnOpen.addEventListener('click', () => {
+  // Direct modal opener & closer functions
+  window.openAdjustmentModal = function() {
     form.reset();
     populateTeacherDropdowns();
     modal.classList.add('show');
-  });
+  };
 
-  const closeModal = () => modal.classList.remove('show');
-  btnClose.addEventListener('click', closeModal);
-  btnCancel.addEventListener('click', closeModal);
+  window.closeAdjustmentModal = function() {
+    modal.classList.remove('show');
+  };
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) window.closeAdjustmentModal();
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -530,7 +696,7 @@ function setupAdjustmentsView() {
       });
 
       if (res.ok) {
-        closeModal();
+        window.closeAdjustmentModal();
         showToast('Adjustment created');
         fetchAdjustments();
       } else {

@@ -146,10 +146,14 @@
                 </div>
                 <div class="form-group flex-1">
                   <label>Rules &amp; Overrides</label>
-                  <div style="padding-top: 8px;">
+                  <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 4px;">
                     <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
                       <input type="checkbox" id="allow7hOverride" style="width: 16px; height: 16px;">
-                      <span>Allow daily cap override to 7 hours if needed</span>
+                      <span>Allow daily cap override to 7 hours maximum (default 6h)</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+                      <input type="checkbox" id="allow4hContinuousOverride" style="width: 16px; height: 16px;">
+                      <span>Allow continuous teaching override up to 4 hours maximum (default 3h)</span>
                     </label>
                   </div>
                 </div>
@@ -291,17 +295,37 @@
           <div class="content-header">
             <div>
               <h1 class="page-title">Teachers &amp; Skills</h1>
-              <p class="page-subtitle">Manage teacher logins, VTC codes, and eligibility for Teen and Speak+ classes.</p>
+              <p class="page-subtitle">Manage master teachers, logins, VTCs, and eligibility for Teen and Speak+ classes.</p>
             </div>
-            <button class="btn btn-primary" id="btnOpenAddTeacher">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
-              Add Teacher
-            </button>
+            <div class="btn-group">
+              <input type="file" id="hubTeacherFileInput" accept=".xlsx" style="display: none;">
+              <button class="btn btn-secondary" id="btnUploadHubTeacherList" onclick="document.getElementById('hubTeacherFileInput').click()">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Upload Hub Teacher List
+              </button>
+              <a href="/api/teachers/export" class="btn btn-secondary" download>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Export Roster
+              </a>
+              <button class="btn btn-primary" id="btnOpenAddTeacher">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Add Teacher
+              </button>
+            </div>
           </div>
 
+          <!-- Teacher View Sub-tabs -->
           <div class="controls-bar mb-3">
             <div class="search-box">
               <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -312,10 +336,26 @@
             </div>
 
             <div class="filter-group">
-              <button class="filter-btn active" data-tfilter="all">All</button>
-              <button class="filter-btn" data-tfilter="teens">Teens List</button>
-              <button class="filter-btn" data-tfilter="speak_plus">Speak+ List</button>
-              <button class="filter-btn" data-tfilter="active">Active Only</button>
+              <button class="filter-btn active" data-tfilter="all" id="tabBtnAllTeachers">All Teachers (<span id="countAllTeachers">0</span>)</button>
+              <button class="filter-btn" data-tfilter="teens" id="tabBtnTeensTeachers">Teens List (<span id="countTeensTeachers">0</span>)</button>
+              <button class="filter-btn" data-tfilter="speak_plus" id="tabBtnSpeakTeachers">Speak+ List (<span id="countSpeakTeachers">0</span>)</button>
+              <button class="filter-btn" data-tfilter="placeholder" id="tabBtnPlaceholders">Placeholders / TBA</button>
+            </div>
+          </div>
+
+          <!-- Quick Add to Skills Section (Shown when in Teens or Speak+ tab) -->
+          <div id="quickSkillAddSection" class="card mb-3" style="display: none; padding: 12px 18px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+              <div>
+                <strong id="quickSkillTitle">Add Teacher to List</strong>
+                <p class="stat-sub" id="quickSkillDesc">Select any teacher from your roster to grant qualification.</p>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <select id="quickSkillTeacherSelect" class="form-select form-select-sm" style="min-width: 260px;">
+                  <!-- Options populated dynamically -->
+                </select>
+                <button class="btn btn-primary btn-sm" id="btnQuickAddSkill">+ Add to List</button>
+              </div>
             </div>
           </div>
 
@@ -328,8 +368,8 @@
                     <th>Account / Login</th>
                     <th>VTC Code</th>
                     <th>Shift</th>
-                    <th>Day Off</th>
-                    <th>Weekend</th>
+                    <th>Rotation Group</th>
+                    <th>Fixed Off</th>
                     <th>Teens</th>
                     <th>Speak+</th>
                     <th>Status</th>
@@ -346,31 +386,49 @@
 
 
         <!-- ================================================================
-             VIEW 3: SHIFTS & OFF DAYS
+             VIEW 3: SHIFTS & OFF DAYS (FROM SHIFT ROTATION LIST)
              ================================================================ -->
         <section id="shiftsView" class="view-panel">
           <div class="content-header">
             <div>
-              <h1 class="page-title">Shifts &amp; Roster Patterns</h1>
-              <p class="page-subtitle">Configure shift working windows and view weekend group rotations.</p>
+              <h1 class="page-title">Shifts &amp; Rotation Groups</h1>
+              <p class="page-subtitle">Configure shift working windows, weekly off days, and 2-week alternate weekend rotations.</p>
             </div>
+            <button class="btn btn-primary" id="btnOpenAddRotation" onclick="openAddRotationModal()">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              Add Shift Rotation Group
+            </button>
           </div>
 
-          <!-- Shifts Grid -->
+          <!-- Shift Hours Windows -->
+          <h3 class="card-title mb-2">Shift Working Hours (CET)</h3>
           <div class="stats-grid mb-4" id="shiftsCardsGrid">
             <!-- Loaded via API -->
           </div>
 
+          <!-- Visual Shift Rotation Cards (from Shift Rotation.png) -->
+          <div class="card-header-bar mb-2">
+            <h3 class="card-title">Shift Rotation Patterns (2-Week Cycle)</h3>
+            <span class="text-muted" style="font-size: 12px;">Defined patterns from Shift Rotation List</span>
+          </div>
+
+          <div id="rotationsListContainer" style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px;">
+            <!-- Populated dynamically with 2-week visual grids -->
+          </div>
+
+          <!-- Rotation Rules Documentation -->
           <div class="card">
-            <h3 class="card-title mb-2">Alternate Weekend Rotation Logic</h3>
-            <p class="text-secondary mb-3">
-              Teachers are assigned to either <strong>Weekend Group A</strong> or <strong>Weekend Group B</strong>.
-              The scheduler enforces alternating weekends based on the calendar week number:
+            <h3 class="card-title mb-2">How Rotations Work in the Scheduler</h3>
+            <p class="text-secondary mb-2">
+              Each rotation defines a teacher's schedule pattern repeating every 2 weeks:
             </p>
             <ul style="padding-left: 20px; line-height: 1.8; color: var(--text-secondary);">
-              <li><strong>Even Calendar Weeks</strong>: Group A is OFF; Group B works Saturday &amp; Sunday.</li>
-              <li><strong>Odd Calendar Weeks</strong>: Group B is OFF; Group A works Saturday &amp; Sunday.</li>
-              <li>Weekend status is strictly calendar-based and does not change if a teacher takes ad-hoc leave or sick days.</li>
+              <li><strong>Fixed Weekday Off</strong>: Teachers never get scheduled on their designated off day (e.g. Group 1 = Thursday, Group 2 = Friday, Group 3 = Tuesday, Group 4 = Wednesday).</li>
+              <li><strong>Alternate Weekends</strong>: In Week 1, Saturday and Sunday are marked <strong>OFF</strong>. In Week 2, Saturday and Sunday are <strong>Shifted</strong> (working).</li>
+              <li><strong>Repeats from Week 1</strong>: The rotation continuously alternates between 4 working days (Week 1) and 6 working days (Week 2). Maximum 6 consecutive days is strictly maintained.</li>
             </ul>
           </div>
         </section>
@@ -385,7 +443,7 @@
               <h1 class="page-title">Teacher Schedule Adjustments</h1>
               <p class="page-subtitle">Capture constraints, childcare blocks, time window limits, and ad-hoc unavailable days.</p>
             </div>
-            <button class="btn btn-primary" id="btnOpenAddAdjustment">
+            <button class="btn btn-primary" id="btnOpenAddAdjustment" onclick="openAdjustmentModal()">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <line x1="12" y1="5" x2="12" y2="19"></line>
                 <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -454,12 +512,8 @@
               <input type="text" id="tVtc" class="form-input" placeholder="e.g. vtc1234">
             </div>
             <div class="form-group flex-1">
-              <label for="tStatus">Account Status</label>
-              <select id="tStatus" class="form-select">
-                <option value="active">Active Teacher</option>
-                <option value="placeholder">Placeholder / TBA</option>
-                <option value="resigned">Resigned (Hidden = Yes)</option>
-              </select>
+              <label for="tEmail">Email Address</label>
+              <input type="email" id="tEmail" class="form-input" placeholder="e.g. jane@example.com">
             </div>
           </div>
 
@@ -473,22 +527,20 @@
               </select>
             </div>
             <div class="form-group flex-1">
-              <label for="tDayOff">Fixed Weekly Day Off</label>
-              <select id="tDayOff" class="form-select">
-                <option value="Monday">Monday</option>
-                <option value="Tuesday">Tuesday</option>
-                <option value="Wednesday">Wednesday</option>
-                <option value="Thursday">Thursday</option>
-                <option value="Friday">Friday</option>
-                <option value="Saturday">Saturday</option>
-                <option value="Sunday">Sunday</option>
+              <label for="tRotation">Rotation Group</label>
+              <select id="tRotation" class="form-select">
+                <option value="rot-1">Rotation 1 (Thu Off)</option>
+                <option value="rot-2">Rotation 2 (Fri Off)</option>
+                <option value="rot-3">Rotation 3 (Tue Off)</option>
+                <option value="rot-4">Rotation 4 (Wed Off)</option>
               </select>
             </div>
             <div class="form-group flex-1">
-              <label for="tWeekendGroup">Weekend Group</label>
-              <select id="tWeekendGroup" class="form-select">
-                <option value="A">Group A (Even Wk Off)</option>
-                <option value="B">Group B (Odd Wk Off)</option>
+              <label for="tStatus">Account Status</label>
+              <select id="tStatus" class="form-select">
+                <option value="active">Active Teacher</option>
+                <option value="placeholder">Placeholder / TBA</option>
+                <option value="resigned">Resigned (Hidden = Yes)</option>
               </select>
             </div>
           </div>
@@ -522,7 +574,7 @@
     <div class="modal-dialog">
       <div class="modal-header">
         <h3 class="modal-title">New Schedule Adjustment</h3>
-        <button class="btn btn-icon" id="btnCloseAdjModal">
+        <button class="btn btn-icon" id="btnCloseAdjModal" onclick="closeAdjustmentModal()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -585,8 +637,74 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" id="btnCancelAdjModal">Cancel</button>
+          <button type="button" class="btn btn-secondary" id="btnCancelAdjModal" onclick="closeAdjustmentModal()">Cancel</button>
           <button type="submit" class="btn btn-primary">Create Adjustment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ====================================================================
+       MODAL: ADD / EDIT ROTATION GROUP
+       ==================================================================== -->
+  <div class="modal-backdrop" id="rotationModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="rotationModalTitle">Add Rotation Group</h3>
+        <button class="btn btn-icon" onclick="closeAddRotationModal()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <form id="rotationForm">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="rotName">Group Name</label>
+              <input type="text" id="rotName" class="form-input" placeholder="e.g. Rotation 5" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="rotShift">Shift Working Hours</label>
+              <select id="rotShift" class="form-select">
+                <option value="day">Day Shift (07:00 – 19:00 CET)</option>
+                <option value="evening">Evening Shift (13:00 – 01:00 CET)</option>
+                <option value="latam">Latam (21:00 – 09:00 CET)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="rotDayOff">Fixed Weekly Off Day</label>
+              <select id="rotDayOff" class="form-select">
+                <option value="Monday">Monday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Saturday">Saturday</option>
+                <option value="Sunday">Sunday</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label for="rotWeekendPattern">Weekend Pattern</label>
+              <select id="rotWeekendPattern" class="form-select">
+                <option value="w1_off">Week 1 Weekend OFF, Week 2 Shifted</option>
+                <option value="w2_off">Week 1 Weekend Shifted, Week 2 OFF</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="rotDesc">Description</label>
+            <input type="text" id="rotDesc" class="form-input" placeholder="e.g. Thursday off with alternate weekend rotation">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeAddRotationModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Rotation Group</button>
         </div>
       </form>
     </div>

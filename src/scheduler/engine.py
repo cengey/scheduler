@@ -72,12 +72,14 @@ def generate_revised_schedule(
     daily_hour_cap: float = 6.0,
     max_continuous_hours: float = 3.0,
     allow_7h_override: bool = False,
+    allow_4h_continuous_override: bool = False,
 ) -> Dict[str, Any]:
     """Generate a revised schedule by matching uploaded classes against target distributions."""
     monday_dt = datetime.strptime(week_start_date, "%Y-%m-%d").date()
     # ISO calendar week number determines alternate weekend cycle
     iso_week_num = monday_dt.isocalendar()[1]
     effective_hour_cap = 7.0 if allow_7h_override else daily_hour_cap
+    effective_continuous_cap = 4.0 if allow_4h_continuous_override else max_continuous_hours
 
     # Pre-index teachers
     teacher_by_account = {t["account"]: t for t in teachers}
@@ -220,7 +222,7 @@ def generate_revised_schedule(
                 curr_continuous = s_dur
             prev_end = s_end
 
-            if curr_continuous > max_continuous_hours:
+            if curr_continuous > effective_continuous_cap:
                 return False
 
         return True

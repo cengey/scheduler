@@ -226,3 +226,140 @@ def export_schedule_to_excel(
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue()
+
+
+def parse_hub_teacher_list(
+    file_source: Union[str, bytes, io.BytesIO],
+) -> List[Dict[str, Any]]:
+    """Parse Hub Teacher List.xlsx to extract master teacher profiles.
+
+    Columns expected: Name, VTC, Status, Platform Username, Email, etc.
+    """
+    if isinstance(file_source, bytes):
+        wb = openpyxl.load_workbook(io.BytesIO(file_source), data_only=True)
+    elif isinstance(file_source, io.BytesIO):
+        wb = openpyxl.load_workbook(file_source, data_only=True)
+    else:
+        wb = openpyxl.load_workbook(file_source, data_only=True)
+
+    ws = wb['Teachers'] if 'Teachers' in wb.sheetnames else wb.worksheets[0]
+    rows = list(ws.iter_rows(min_row=1, values_only=True))
+    if not rows:
+        return []
+
+    header = [str(c or "").strip().lower() for c in rows[0]]
+    col_map = {
+        "name": 0,
+        "vtc": 1,
+        "status": 2,
+        "username": 3,
+        "email": 5,
+        "shift": None,
+        "rotation": None,
+        "day_off": None,
+        "weekend": None,
+        "teens": None,
+        "speak_plus": None,
+    }
+
+    for idx, h in enumerate(header):
+        if "user" in h or "account" in h or "login" in h:
+            col_map["username"] = idx
+        elif "vtc" in h:
+            col_map["vtc"] = idx
+        elif "status" in h:
+            col_map["status"] = idx
+        elif "name" in h and "user" not in h:
+            col_map["name"] = idx
+        elif "email" in h:
+            col_map["email"] = idx
+        elif "shift" in h:
+            col_map["shift"] = idx
+        elif "rotation" in h or "group" in h:
+            col_map["rotation"] = idx
+        elif "off" in h:
+            col_map["day_off"] = idx
+        elif "teen" in h:
+            col_map["teens"] = idx
+        elif "speak" in h:
+            col_map["speak_plus"] = idx
+
+    teachers: List[Dict[str, Any]] = []
+    for r in rows[1:]:
+        if not r or len(r) <= (col_map["username"] or 3):
+            continue
+        username = str(r[col_map["username"]] or "").strip()
+        if not username:
+            continue
+
+        name = str(r[col_map["name"]] or username).strip()
+        vtc = str(r[col_map["vtc"]] or "").strip() if col_map["vtc"] is not None and len(r) > col_map["vtc"] else ""
+        raw_status = str(r[col_map["status"]] or "Active").strip() if col_map["status"] is not None and len(r) > col_map["status"] else "Active"
+        email = str(r[col_map["email"]] or "").strip() if col_map["email"] is not None and len(r) > col_map["email"] else ""
+
+        status = "resigned" if raw_status.lower() in ("inactive", "resigned") else "active"
+        if "to be assigned" in name.lower() or name.lower() == "cengey g":
+            status = "placeholder"
+
+        item = {
+            "account": username,
+            "name": name,
+            "vtc": vtc,
+            "email": email,
+            "status": status,
+        }
+
+        if col_map["shift"] is not None and len(r) > col_map["shift"] and r[col_map["shift"]]:
+            item["shift_id"] = str(r[col_map["shift"]]).strip().lower()
+        if col_map["rotation"] is not None and len(r) > col_map["rotation"] and r[col_map["rotation"]]:
+            item["rotation_id"] = str(r[col_map["rotation"]]).strip()
+        if col_map["day_off"] is not None and len(r) > col_map["day_off"] and r[col_map["day_off"]]:
+            item["fixed_day_off"] = str(r[col_map["day_off"]]).strip()
+        if col_map["teens"] is not None and len(r) > col_map["teens"] and r[col_map["teens"]]:
+            t_val = str(r[col_map["teens"]]).strip().lower()
+            item["teens_qualified"] = t_val in ("1", "true", "yes", "y")
+        if col_map["speak_plus"] is not None and len(r) > col_map["speak_plus"] and r[col_map["speak_plus"]]:
+            sp_val = str(r[col_map["speak_plus"]]).strip().lower()
+            item["speak_plus_qualified"] = sp_val in ("1", "true", "yes", "y")
+
+        teachers.append(item)
+
+    return teachers
+
+
+def export_teachers_to_excel(teachers: List[Dict[str, Any]]) -> bytes:
+    """Export the master teacher roster to an Excel workbook."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Teachers"
+
+    headers = [
+        "Account / Username", "Full Name", "VTC", "Email", "Status",
+        "Shift", "Rotation Group", "Fixed Day Off", "Weekend Group",
+        "Teens Qualified", "Speak+ Qualified"
+    ]
+    ws.append(headers)
+
+    for t in teachers:
+        ws.append([
+            t.get("account", ""),
+            t.get("name", ""),
+            t.get("vtc", ""),
+            t.get("email", ""),
+            t.get("status", "active"),
+            t.get("shift_id", "day"),
+            t.get("rotation_id", "rot-1"),
+            t.get("fixed_day_off", "Thursday"),
+            t.get("weekend_group", "A"),
+            "Yes" if t.get("teens_qualified") else "No",
+            "Yes" if t.get("speak_plus_qualified") else "No",
+        ])
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

@@ -86,9 +86,9 @@ def list_teachers(
             params.append(status)
 
         if qualification == "teens":
-            query += " AND teens_qualified = 1"
+            query += " AND teens_qualified = 1 AND status != 'placeholder'"
         elif qualification == "speak_plus":
-            query += " AND speak_plus_qualified = 1"
+            query += " AND speak_plus_qualified = 1 AND status != 'placeholder'"
 
         if shift:
             query += " AND shift_id = ?"
@@ -99,7 +99,8 @@ def list_teachers(
             term = f"%{search.strip()}%"
             params.extend([term, term, term, term])
 
-        query += " ORDER BY name ASC"
+        # Active teachers first, then placeholders, then archived/leavers, sorted by name
+        query += " ORDER BY CASE status WHEN 'active' THEN 1 WHEN 'placeholder' THEN 2 ELSE 3 END, name ASC"
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
@@ -415,6 +416,7 @@ async def generate_schedule_endpoint(
     file_schedule: UploadFile = File(...),
     allow_7h_override: bool = Form(False),
     allow_4h_continuous_override: bool = Form(False),
+    include_archived: bool = Form(False),
 ):
     """Run the delta scheduling engine on the uploaded distribution and schedule files."""
     try:
@@ -453,6 +455,7 @@ async def generate_schedule_endpoint(
             adjustments=adjustments,
             allow_7h_override=allow_7h_override,
             allow_4h_continuous_override=allow_4h_continuous_override,
+            include_archived=include_archived,
         )
 
         # Save generated schedule into database
@@ -488,13 +491,14 @@ async def generate_schedule_endpoint(
                     c["class_type"],
                     c.get("hidden", "No"),
                     c.get("action", "kept"),
+                    c.get("comment", ""),
                 )
                 for c in result["classes"]
             ]
             conn.executemany("""
                 INSERT INTO schedule_items
-                (id, schedule_id, account, name, time, end_time, vtc, class_type, hidden, action)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, schedule_id, account, name, time, end_time, vtc, class_type, hidden, action, comment)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, item_records)
             conn.commit()
 
@@ -502,7 +506,7 @@ async def generate_schedule_endpoint(
             "schedule_id": sched_id,
             "week_start_date": week_start_date,
             "stats": stats,
-            "change_log_sample": result["change_log"][:40],
+            "change_log_sample": result["change_log"][:50],
             "total_changes": len(result["change_log"]),
         }
 
@@ -512,14 +516,14 @@ async def generate_schedule_endpoint(
 
 @router.get("/schedule/{schedule_id}/export")
 def export_schedule_endpoint(schedule_id: str):
-    """Download the finalised schedule in the exact Sandbox Schedule structure."""
+    """Download the finalised schedule in the exact Sandbox Schedule structure with Column H Comments."""
     with get_connection() as conn:
         sched = conn.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
         if not sched:
             raise HTTPException(status_code=404, detail="Schedule not found")
 
         rows = conn.execute("""
-            SELECT account, name, time, end_time, vtc, class_type, hidden
+            SELECT account, name, time, end_time, vtc, class_type, hidden, comment
             FROM schedule_items
             WHERE schedule_id = ?
             ORDER BY time ASC, name ASC
@@ -542,11 +546,13 @@ def get_schedule_classes(
     schedule_id: str,
     day: Optional[str] = None,
     class_type: Optional[str] = None,
+    action: Optional[str] = None,
+    sort_by: Optional[str] = "time_asc",
     search: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
 ):
-    """Paginated classes for the interactive review grid."""
+    """Paginated classes for the interactive review grid with sorting and action filtering."""
     with get_connection() as conn:
         query = "SELECT * FROM schedule_items WHERE schedule_id = ?"
         params: List[Any] = [schedule_id]
@@ -559,15 +565,33 @@ def get_schedule_classes(
             query += " AND class_type = ?"
             params.append(class_type)
 
+        if action and action != "all":
+            query += " AND action = ?"
+            params.append(action)
+
         if search:
-            query += " AND (name LIKE ? OR account LIKE ?)"
+            query += " AND (name LIKE ? OR account LIKE ? OR comment LIKE ?)"
             term = f"%{search.strip()}%"
-            params.extend([term, term])
+            params.extend([term, term, term])
 
         count_query = query.replace("SELECT *", "SELECT COUNT(*)")
         total = conn.execute(count_query, params).fetchone()[0]
 
-        query += " ORDER BY time ASC, name ASC LIMIT ? OFFSET ?"
+        # Sorting logic
+        if sort_by == "time_desc":
+            order_clause = "ORDER BY time DESC, name ASC"
+        elif sort_by == "name_asc":
+            order_clause = "ORDER BY name ASC, time ASC"
+        elif sort_by == "action_moved":
+            order_clause = "ORDER BY CASE action WHEN 'moved' THEN 1 WHEN 'created' THEN 2 WHEN 'deleted' THEN 3 ELSE 4 END, time ASC"
+        elif sort_by == "action_created":
+            order_clause = "ORDER BY CASE action WHEN 'created' THEN 1 WHEN 'moved' THEN 2 WHEN 'deleted' THEN 3 ELSE 4 END, time ASC"
+        elif sort_by == "action_deleted":
+            order_clause = "ORDER BY CASE action WHEN 'deleted' THEN 1 WHEN 'moved' THEN 2 WHEN 'created' THEN 3 ELSE 4 END, time ASC"
+        else:
+            order_clause = "ORDER BY time ASC, name ASC"
+
+        query += f" {order_clause} LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         rows = conn.execute(query, params).fetchall()
 

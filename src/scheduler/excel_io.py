@@ -189,7 +189,7 @@ def export_schedule_to_excel(
     ws = wb.active
     ws.title = "Classes"
 
-    headers = ["Account", "Name", "Time", "End Time", "VTC", "Class Type", "Hidden"]
+    headers = ["Account", "Name", "Time", "End Time", "VTC", "Class Type", "Hidden", "Comment"]
     ws.append(headers)
 
     # Sort classes chronologically by Time, then Teacher Name
@@ -207,13 +207,17 @@ def export_schedule_to_excel(
             item.get("vtc", ""),
             item.get("class_type", ""),
             item.get("hidden", "No"),
+            item.get("comment", ""),
         ])
 
-    # Auto-fit column widths slightly for neatness
+    # Auto-fit column widths cleanly for readable comments
     for col in ws.columns:
         max_len = max(len(str(cell.value or "")) for cell in col)
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
-        ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+        if col_letter == 'H':
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 35)
+        else:
+            ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
     if isinstance(output_path_or_buffer, str):
         wb.save(output_path_or_buffer)
@@ -297,7 +301,7 @@ def parse_hub_teacher_list(
         raw_status = str(r[col_map["status"]] or "Active").strip() if col_map["status"] is not None and len(r) > col_map["status"] else "Active"
         email = str(r[col_map["email"]] or "").strip() if col_map["email"] is not None and len(r) > col_map["email"] else ""
 
-        status = "resigned" if raw_status.lower() in ("inactive", "resigned") else "active"
+        status = "archived" if raw_status.lower() in ("archived", "inactive", "resigned", "leaver") else "active"
         if "to be assigned" in name.lower() or name.lower() == "cengey g":
             status = "placeholder"
 

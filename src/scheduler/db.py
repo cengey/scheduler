@@ -123,34 +123,79 @@ def init_db() -> None:
                 vtc TEXT NOT NULL,
                 class_type TEXT NOT NULL,
                 hidden TEXT NOT NULL DEFAULT 'No',
-                action TEXT DEFAULT 'kept'
+                action TEXT DEFAULT 'kept',
+                comment TEXT DEFAULT ''
             )
         """)
 
-        # Insert default shifts if not present
-        cursor.execute("SELECT COUNT(*) FROM shifts")
-        if cursor.fetchone()[0] == 0:
-            cursor.executemany("""
+        # Schema migrations for schedule_items
+        item_cols = [col[1] for col in cursor.execute("PRAGMA table_info(schedule_items)").fetchall()]
+        if "comment" not in item_cols:
+            cursor.execute("ALTER TABLE schedule_items ADD COLUMN comment TEXT DEFAULT ''")
+
+        # Standard Shifts: 3 Rotating + 3 Non-rotating
+        standard_shifts = [
+            ("day", "Day Shift", "07:00", "19:00", "Standard daytime window (07:00 – 19:00 CET)"),
+            ("evening", "Evening Shift", "13:00", "01:00", "Afternoon/evening window (13:00 – 01:00 CET)"),
+            ("latam", "Latam Shift", "21:00", "09:00", "Latam overnight window (21:00 – 09:00 CET)"),
+            ("weekend_day", "Weekend Only Day shift", "07:00", "19:00", "Weekend daytime window (Saturday & Sunday)"),
+            ("weekend_latam", "Weekend Only Latam Shift", "21:00", "09:00", "Weekend Latam overnight window (Saturday & Sunday)"),
+            ("standby", "Standby shift", "00:00", "23:59", "Standby / On-call coverage"),
+        ]
+        for s_id, s_name, s_start, s_end, s_desc in standard_shifts:
+            cursor.execute("""
                 INSERT INTO shifts (id, name, start_time, end_time, description)
                 VALUES (?, ?, ?, ?, ?)
-            """, [
-                ("day", "Day Shift", "07:00", "19:00", "Daytime window (07:00 – 19:00 CET)"),
-                ("evening", "Evening Shift", "13:00", "01:00", "Afternoon/evening window (13:00 – 01:00 CET)"),
-                ("latam", "Latam (Graveyard)", "21:00", "09:00", "Overnight graveyard window (21:00 – 09:00 CET)"),
-            ])
+                ON CONFLICT(id) DO UPDATE SET
+                    name = CASE WHEN shifts.name LIKE '%Graveyard%' THEN excluded.name ELSE shifts.name END
+            """, (s_id, s_name, s_start, s_end, s_desc))
 
-        # Insert default rotation groups from Shift Rotation.png
-        cursor.execute("SELECT COUNT(*) FROM shift_rotations")
-        if cursor.fetchone()[0] == 0:
-            cursor.executemany("""
-                INSERT INTO shift_rotations (id, name, shift_id, fixed_day_off, week1_weekend_off, week2_weekend_off, description)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, [
-                ("rot-1", "Rotation 1", "day", "Thursday", 1, 0, "Thursday OFF | Wk 1 Weekend OFF, Wk 2 Weekend Shifted"),
-                ("rot-2", "Rotation 2", "day", "Friday", 1, 0, "Friday OFF | Wk 1 Weekend OFF, Wk 2 Weekend Shifted"),
-                ("rot-3", "Rotation 3", "day", "Tuesday", 1, 0, "Tuesday OFF | Wk 1 Weekend OFF, Wk 2 Weekend Shifted"),
-                ("rot-4", "Rotation 4", "day", "Wednesday", 1, 0, "Wednesday OFF | Wk 1 Weekend OFF, Wk 2 Weekend Shifted"),
-            ])
+        # Standard 4 Rotations per Rotating Shift Group (Day, Evening, Latam)
+        rotating_shifts = [
+            ("day", "Day"),
+            ("evening", "Evening"),
+            ("latam", "Latam"),
+        ]
+        rot_days = ["Thursday", "Friday", "Tuesday", "Wednesday"]
+        for s_id, s_prefix in rotating_shifts:
+            for rot_num in range(1, 5):
+                rot_code = f"rot-{rot_num}" if s_id == "day" else f"rot-{s_id}-{rot_num}"
+                rot_name = f"Rotation {rot_num}" if s_id == "day" else f"{s_prefix} Rotation {rot_num}"
+                fixed_day = rot_days[rot_num - 1]
+                cursor.execute("""
+                    INSERT OR IGNORE INTO shift_rotations (id, name, shift_id, fixed_day_off, week1_weekend_off, week2_weekend_off, description)
+                    VALUES (?, ?, ?, ?, 1, 0, ?)
+                """, (
+                    rot_code,
+                    rot_name,
+                    s_id,
+                    fixed_day,
+                    f"{fixed_day} OFF | Wk 1 Weekend OFF, Wk 2 Weekend Shifted",
+                ))
+
+        # Update any obsolete status names to standard 'archived'
+        cursor.execute("UPDATE teachers SET status = 'archived' WHERE status IN ('resigned', 'inactive', 'leaver')")
+
+        # Sync with Hub Teacher List.xlsx if present
+        scheduling_dir = Path(__file__).resolve().parent.parent.parent / "Scheduling"
+        hub_path = scheduling_dir / "Hub Teacher List.xlsx"
+        if hub_path.is_file():
+            try:
+                import openpyxl
+                wb_hub = openpyxl.load_workbook(hub_path, data_only=True)
+                ws_hub = wb_hub['Teachers'] if 'Teachers' in wb_hub.sheetnames else wb_hub.worksheets[0]
+                archived_users = []
+                for r in ws_hub.iter_rows(min_row=2, values_only=True):
+                    if not r or len(r) < 4:
+                        continue
+                    st = str(r[2] or "").strip().lower()
+                    u = str(r[3] or "").strip()
+                    if u and st in ("archived", "inactive", "resigned", "leaver"):
+                        archived_users.append(u)
+                if archived_users:
+                    cursor.executemany("UPDATE teachers SET status = 'archived' WHERE account = ?", [(u,) for u in archived_users])
+            except Exception:
+                pass
 
         conn.commit()
 
@@ -233,8 +278,10 @@ def seed_teachers_from_sandbox_if_empty() -> None:
                     teacher_map[username]["email"] = email
                     if not teacher_map[username]["vtc"]:
                         teacher_map[username]["vtc"] = vtc
+                    if hub_status.lower() in ("archived", "inactive", "resigned", "leaver"):
+                        teacher_map[username]["status"] = "archived"
                 else:
-                    status = "resigned" if hub_status.lower() == "inactive" else "active"
+                    status = "archived" if hub_status.lower() in ("archived", "inactive", "resigned", "leaver") else "active"
                     teacher_map[username] = {
                         "account": username,
                         "name": name,

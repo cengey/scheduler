@@ -119,6 +119,10 @@
                       <input type="checkbox" id="allow4hContinuousOverride" style="width: 16px; height: 16px;">
                       <span>Allow continuous teaching override up to 4 hours maximum (default 3h)</span>
                     </label>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+                      <input type="checkbox" id="includeArchivedTeachers" style="width: 16px; height: 16px;">
+                      <span>Include Archived Teachers (allow scheduling to leavers/archived teachers)</span>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -182,7 +186,8 @@
 
           <!-- Results Summary (Shown after run) -->
           <div id="resultsSummarySection" style="display: none;">
-            <div class="stats-grid mb-4">
+            <!-- 4 KPI Cards -->
+            <div class="stats-grid mb-4" style="grid-template-columns: repeat(4, 1fr);">
               <div class="stat-card">
                 <div class="stat-header">
                   <span class="stat-label">Total Classes</span>
@@ -192,26 +197,75 @@
               </div>
               <div class="stat-card">
                 <div class="stat-header">
-                  <span class="stat-label">Changes from Schedule</span>
+                  <span class="stat-label">🔄 Classes to be Moved</span>
                 </div>
-                <div class="stat-value" id="resTotalChanges">-</div>
-                <span class="stat-sub" id="resChangeBreakdown">Added: - | Removed: -</span>
+                <div class="stat-value" id="resMovedCount" style="color: #d97706;">-</div>
+                <span class="stat-sub">Reassigned to active teachers</span>
               </div>
               <div class="stat-card">
                 <div class="stat-header">
-                  <span class="stat-label">Unassigned / Placeholder</span>
+                  <span class="stat-label">➕ Classes to be Created</span>
                 </div>
-                <div class="stat-value" id="resPlaceholderCount">-</div>
-                <span class="stat-sub">Flagged as Hidden = Yes</span>
+                <div class="stat-value" id="resCreatedCount" style="color: #059669;">-</div>
+                <span class="stat-sub">Deficit demand added</span>
+              </div>
+              <div class="stat-card">
+                <div class="stat-header">
+                  <span class="stat-label">❌ Classes to be Deleted</span>
+                </div>
+                <div class="stat-value" id="resDeletedCount" style="color: #dc2626;">-</div>
+                <span class="stat-sub">Surplus classes removed</span>
+              </div>
+            </div>
+
+            <!-- Review Actions & Sorting Toolbar (Directly under KPI cards) -->
+            <div class="review-actions-bar">
+              <div class="action-filter-pills" id="reviewActionPills">
+                <button type="button" class="action-pill active" data-action="all">
+                  All Classes <span class="badge-count" id="pillCountAll">0</span>
+                </button>
+                <button type="button" class="action-pill" data-action="moved">
+                  🔄 Moved <span class="badge-count" id="pillCountMoved">0</span>
+                </button>
+                <button type="button" class="action-pill" data-action="created">
+                  ➕ Created <span class="badge-count" id="pillCountCreated">0</span>
+                </button>
+                <button type="button" class="action-pill" data-action="deleted">
+                  ❌ Deleted <span class="badge-count" id="pillCountDeleted">0</span>
+                </button>
+                <button type="button" class="action-pill" data-action="kept">
+                  Kept Intact <span class="badge-count" id="pillCountKept">0</span>
+                </button>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <label for="reviewSortBy" style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Sort by:</label>
+                <select id="reviewSortBy" class="form-select form-select-sm" style="min-width: 170px;">
+                  <option value="time_asc">Date &amp; Time (Earliest First)</option>
+                  <option value="time_desc">Date &amp; Time (Latest First)</option>
+                  <option value="action_moved">Classes to be Moved First</option>
+                  <option value="action_created">Classes to be Created First</option>
+                  <option value="action_deleted">Classes to be Deleted First</option>
+                  <option value="name_asc">Teacher Name (A–Z)</option>
+                </select>
+
+                <a href="#" class="btn btn-primary btn-sm" id="btnExportFinalSchedule" download>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  Export Proposed Schedule (.xlsx)
+                </a>
               </div>
             </div>
 
             <!-- Review Classes Grid -->
             <div class="card">
               <div class="card-header-bar mb-3">
-                <h3 class="card-title">Schedule Review</h3>
+                <h3 class="card-title">Schedule Directives &amp; Class Review</h3>
                 <div class="filter-controls-row">
-                  <input type="text" id="reviewSearch" class="form-input form-input-sm" placeholder="Filter teacher or account...">
+                  <input type="text" id="reviewSearch" class="form-input form-input-sm" placeholder="Search teacher, account, or comment...">
                   <select id="reviewClassType" class="form-select form-select-sm">
                     <option value="">All Class Types</option>
                     <option value="Adult">Adult</option>
@@ -229,9 +283,9 @@
                       <th>End Time</th>
                       <th>Teacher Name</th>
                       <th>Account</th>
-                      <th>VTC</th>
                       <th>Class Type</th>
                       <th>Action</th>
+                      <th>Client's Hub Directives (Column H Comment)</th>
                     </tr>
                   </thead>
                   <tbody id="reviewTableBody">
@@ -296,14 +350,16 @@
                 <circle cx="11" cy="11" r="8"></circle>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
               </svg>
-              <input type="text" id="teacherSearchInput" class="search-input" placeholder="Search teacher by name or login...">
+              <input type="text" id="teacherSearchInput" class="search-input" placeholder="Search teacher by name, account, or VTC...">
             </div>
 
             <div class="filter-group">
-              <button class="filter-btn active" data-tfilter="all" id="tabBtnAllTeachers">All Teachers (<span id="countAllTeachers">0</span>)</button>
+              <button class="filter-btn active" data-tfilter="active" id="tabBtnActiveTeachers">Active Teachers (<span id="countActiveTeachers">0</span>)</button>
+              <button class="filter-btn" data-tfilter="all" id="tabBtnAllTeachers">All (<span id="countAllTeachers">0</span>)</button>
               <button class="filter-btn" data-tfilter="teens" id="tabBtnTeensTeachers">Teens List (<span id="countTeensTeachers">0</span>)</button>
               <button class="filter-btn" data-tfilter="speak_plus" id="tabBtnSpeakTeachers">Speak+ List (<span id="countSpeakTeachers">0</span>)</button>
-              <button class="filter-btn" data-tfilter="placeholder" id="tabBtnPlaceholders">Placeholders / TBA</button>
+              <button class="filter-btn" data-tfilter="placeholder" id="tabBtnPlaceholders">Placeholders (<span id="countPlaceholders">0</span>)</button>
+              <button class="filter-btn" data-tfilter="archived" id="tabBtnArchivedTeachers">Archived / Leavers (<span id="countArchivedTeachers">0</span>)</button>
             </div>
           </div>
 
@@ -331,13 +387,13 @@
                     <th>Teacher Name</th>
                     <th>Account / Login</th>
                     <th>VTC Code</th>
-                    <th>Shift</th>
+                    <th>Status</th>
+                    <th>Shift Group</th>
                     <th>Rotation Group</th>
                     <th>Fixed Off</th>
-                    <th>Teens</th>
-                    <th>Speak+</th>
-                    <th>Status</th>
-                    <th>Actions</th>
+                    <th>Weekend</th>
+                    <th>Skills</th>
+                    <th style="text-align: right;">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="teachersTableBody">
@@ -358,25 +414,46 @@
               <h1 class="page-title">Shifts &amp; Rotation Groups</h1>
               <p class="page-subtitle">Configure shift working windows, weekly off days, and 2-week alternate weekend rotations.</p>
             </div>
-            <button class="btn btn-primary" id="btnOpenAddRotation" onclick="openAddRotationModal()">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
-              Add Shift Rotation Group
-            </button>
+            <div class="btn-group">
+              <button class="btn btn-secondary" id="btnShowAllRotations" onclick="filterShiftRotations('all')">
+                View All Shifts
+              </button>
+              <button class="btn btn-primary" id="btnOpenAddRotation" onclick="openAddRotationModal()">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Add Rotation Group
+              </button>
+            </div>
           </div>
 
-          <!-- Shift Hours Windows -->
-          <h3 class="card-title mb-2">Shift Working Hours (CET)</h3>
-          <div class="stats-grid mb-4" id="shiftsCardsGrid">
-            <!-- Loaded via API -->
-          </div>
-
-          <!-- Visual Shift Rotation Cards (from Shift Rotation.png) -->
+          <!-- 3 Clickable Rotating Shift KPI Cards -->
           <div class="card-header-bar mb-2">
-            <h3 class="card-title">Shift Rotation Patterns (2-Week Cycle)</h3>
-            <span class="text-muted" style="font-size: 12px;">Defined patterns from Shift Rotation List</span>
+            <div>
+              <h3 class="card-title">Rotating Shift Groups (Click card to open shift rotations)</h3>
+              <span class="text-muted" style="font-size: 12px;">Day, Evening, and Latam Shift each feature 4 structured rotations</span>
+            </div>
+          </div>
+          <div class="stats-grid mb-4" id="shiftsCardsGrid">
+            <!-- Clickable Cards: Day Shift, Evening Shift, Latam Shift -->
+          </div>
+
+          <!-- Non-Rotating Shifts Section -->
+          <div class="card-header-bar mb-2">
+            <div>
+              <h3 class="card-title">Fixed &amp; Non-Rotating Shifts</h3>
+              <span class="text-muted" style="font-size: 12px;">Weekend Only and Standby shifts without rotating weekend patterns</span>
+            </div>
+          </div>
+          <div class="stats-grid mb-4" id="nonRotatingShiftsGrid" style="grid-template-columns: repeat(3, 1fr);">
+            <!-- Weekend Only Day, Weekend Only Latam, Standby -->
+          </div>
+
+          <!-- Visual Shift Rotation Cards -->
+          <div class="card-header-bar mb-2">
+            <h3 class="card-title" id="rotationsListTitle">Shift Rotation Patterns (2-Week Cycle)</h3>
+            <span class="text-muted" style="font-size: 12px;">Visual schedule alternating between 4 and 6 working days</span>
           </div>
 
           <div id="rotationsListContainer" style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px;">
@@ -449,7 +526,7 @@
   <div class="modal-backdrop" id="teacherModal">
     <div class="modal-dialog">
       <div class="modal-header">
-        <h3 class="modal-title" id="teacherModalTitle">Add New Teacher</h3>
+        <h3 class="modal-title" id="teacherModalTitle">Edit Teacher Profile</h3>
         <button class="btn btn-icon" id="btnCloseTeacherModal">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -458,6 +535,7 @@
         </button>
       </div>
       <form id="teacherForm">
+        <input type="hidden" id="tIsEdit" value="false">
         <div class="modal-body">
           <div class="form-row">
             <div class="form-group flex-1">
@@ -483,13 +561,27 @@
 
           <div class="form-row">
             <div class="form-group flex-1">
-              <label for="tShift">Shift</label>
+              <label for="tStatus">Account Status</label>
+              <select id="tStatus" class="form-select">
+                <option value="active">Active Teacher</option>
+                <option value="archived">Archived / Leaver</option>
+                <option value="placeholder">Placeholder / TBA</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label for="tShift">Shift Group</label>
               <select id="tShift" class="form-select">
                 <option value="day">Day Shift (07:00 - 19:00)</option>
                 <option value="evening">Evening Shift (13:00 - 01:00)</option>
-                <option value="latam">Latam (21:00 - 09:00)</option>
+                <option value="latam">Latam Shift (21:00 - 09:00)</option>
+                <option value="weekend_day">Weekend Only Day shift (07:00 - 19:00)</option>
+                <option value="weekend_latam">Weekend Only Latam Shift (21:00 - 09:00)</option>
+                <option value="standby">Standby shift (On-call)</option>
               </select>
             </div>
+          </div>
+
+          <div class="form-row">
             <div class="form-group flex-1">
               <label for="tRotation">Rotation Group</label>
               <select id="tRotation" class="form-select">
@@ -497,14 +589,27 @@
                 <option value="rot-2">Rotation 2 (Fri Off)</option>
                 <option value="rot-3">Rotation 3 (Tue Off)</option>
                 <option value="rot-4">Rotation 4 (Wed Off)</option>
+                <option value="none">None / Fixed</option>
               </select>
             </div>
             <div class="form-group flex-1">
-              <label for="tStatus">Account Status</label>
-              <select id="tStatus" class="form-select">
-                <option value="active">Active Teacher</option>
-                <option value="placeholder">Placeholder / TBA</option>
-                <option value="resigned">Resigned (Hidden = Yes)</option>
+              <label for="tFixedDayOff">Fixed Weekly Off Day</label>
+              <select id="tFixedDayOff" class="form-select">
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Monday">Monday</option>
+                <option value="Saturday">Saturday</option>
+                <option value="Sunday">Sunday</option>
+                <option value="None">None</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label for="tWeekendGroup">Weekend Group</label>
+              <select id="tWeekendGroup" class="form-select">
+                <option value="A">Group A (Alt Week 1)</option>
+                <option value="B">Group B (Alt Week 2)</option>
               </select>
             </div>
           </div>
@@ -525,7 +630,51 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" id="btnCancelTeacherModal">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save Teacher</button>
+          <button type="submit" class="btn btn-primary" id="btnSubmitTeacherForm">Save Teacher</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ====================================================================
+       MODAL: EDIT SHIFT HOURS
+       ==================================================================== -->
+  <div class="modal-backdrop" id="editShiftModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="editShiftModalTitle">Edit Shift Hours</h3>
+        <button class="btn btn-icon" onclick="closeEditShiftModal()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <form id="editShiftForm">
+        <input type="hidden" id="editShiftId">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="editShiftName">Shift Name</label>
+            <input type="text" id="editShiftName" class="form-input" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="editShiftStartTime">Start Time (CET)</label>
+              <input type="text" id="editShiftStartTime" class="form-input" placeholder="e.g. 07:00" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="editShiftEndTime">End Time (CET)</label>
+              <input type="text" id="editShiftEndTime" class="form-input" placeholder="e.g. 19:00" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="editShiftDesc">Description</label>
+            <input type="text" id="editShiftDesc" class="form-input" placeholder="e.g. Standard daytime window (07:00 – 19:00 CET)">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeEditShiftModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Shift Hours</button>
         </div>
       </form>
     </div>

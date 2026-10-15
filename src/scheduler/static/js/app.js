@@ -5,19 +5,20 @@ const API_BASE = '/api';
 // State
 let teachers = [];
 let adjustments = [];
+let shifts = [];
 let shiftRotations = [];
 let currentScheduleId = null;
 let reviewPage = 0;
 const reviewPageSize = 25;
-let serverStartedAt = null;
+let currentReviewAction = 'all';
+let currentReviewSortBy = 'time_asc';
 
-let currentTeacherTab = 'all';
+let currentTeacherTab = 'active';
 let teacherSearchQuery = '';
+let selectedShiftFilter = 'all';
 
 // DOM Elements
 const toastContainer = document.getElementById('toastContainer');
-
-// Navigation
 const navItems = document.querySelectorAll('.nav-item');
 const viewPanels = document.querySelectorAll('.view-panel');
 
@@ -118,6 +119,7 @@ function setupGeneratorView() {
     formData.append('file_schedule', document.getElementById('fileSchedule').files[0]);
     formData.append('allow_7h_override', document.getElementById('allow7hOverride').checked ? 'true' : 'false');
     formData.append('allow_4h_continuous_override', document.getElementById('allow4hContinuousOverride').checked ? 'true' : 'false');
+    formData.append('include_archived', document.getElementById('includeArchivedTeachers').checked ? 'true' : 'false');
 
     try {
       const res = await fetch(`${API_BASE}/generate-schedule`, {
@@ -148,7 +150,29 @@ function setupGeneratorView() {
     }
   });
 
-  // Review Table Search and Filters
+  // Review Table Action Pills Filtering
+  const actionPills = document.querySelectorAll('#reviewActionPills .action-pill');
+  actionPills.forEach((pill) => {
+    pill.addEventListener('click', () => {
+      actionPills.forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      currentReviewAction = pill.dataset.action || 'all';
+      reviewPage = 0;
+      fetchReviewClasses();
+    });
+  });
+
+  // Review Table Sort By Selector
+  const sortSelect = document.getElementById('reviewSortBy');
+  if (sortSelect) {
+    sortSelect.addEventListener('change', (e) => {
+      currentReviewSortBy = e.target.value;
+      reviewPage = 0;
+      fetchReviewClasses();
+    });
+  }
+
+  // Review Table Search and Class Type Filters
   document.getElementById('reviewSearch').addEventListener('input', () => {
     reviewPage = 0;
     fetchReviewClasses();
@@ -158,6 +182,7 @@ function setupGeneratorView() {
     fetchReviewClasses();
   });
 
+  // Pagination buttons
   document.getElementById('btnPrevPage').addEventListener('click', () => {
     if (reviewPage > 0) {
       reviewPage--;
@@ -172,19 +197,32 @@ function setupGeneratorView() {
 
 function renderGeneratorResults(data) {
   const stats = data.stats;
-  document.getElementById('resTotalClasses').textContent = stats.total_classes.toLocaleString();
-  document.getElementById('resClassBreakdown').textContent = `Adults: ${stats.adult_count} | Teens: ${stats.teens_count} | Speak+: ${stats.speak_plus_count}`;
-  document.getElementById('resTotalChanges').textContent = stats.total_changes.toLocaleString();
-  document.getElementById('resChangeBreakdown').textContent = `Added: ${stats.added_count} | Removed: ${stats.removed_count}`;
-  document.getElementById('resPlaceholderCount').textContent = stats.unassigned_count.toLocaleString();
+  document.getElementById('resTotalClasses').textContent = (stats.total_classes || 0).toLocaleString();
+  document.getElementById('resClassBreakdown').textContent = `Adults: ${stats.adult_count || 0} | Teens: ${stats.teens_count || 0} | Speak+: ${stats.speak_plus_count || 0}`;
+  document.getElementById('resMovedCount').textContent = (stats.moved_count || 0).toLocaleString();
+  document.getElementById('resCreatedCount').textContent = (stats.created_count || 0).toLocaleString();
+  document.getElementById('resDeletedCount').textContent = (stats.deleted_count || 0).toLocaleString();
 
-  // Show sections & enable export
+  // Update Toolbar Pill Counts
+  const totalWithDeleted = (stats.total_classes || 0) + (stats.deleted_count || 0);
+  document.getElementById('pillCountAll').textContent = totalWithDeleted.toLocaleString();
+  document.getElementById('pillCountMoved').textContent = (stats.moved_count || 0).toLocaleString();
+  document.getElementById('pillCountCreated').textContent = (stats.created_count || 0).toLocaleString();
+  document.getElementById('pillCountDeleted').textContent = (stats.deleted_count || 0).toLocaleString();
+  document.getElementById('pillCountKept').textContent = (stats.kept_count || 0).toLocaleString();
+
+  // Show sections & enable Excel export with Column H
   document.getElementById('resultsSummarySection').style.display = 'block';
-  const exportBtn = document.getElementById('downloadExcelBtn');
-  exportBtn.href = `${API_BASE}/schedule/${data.schedule_id}/export`;
-  document.getElementById('exportActionContainer').style.display = 'block';
+  const exportBtn = document.getElementById('btnExportFinalSchedule');
+  if (exportBtn) {
+    exportBtn.href = `${API_BASE}/schedule/${data.schedule_id}/export`;
+  }
 
-  // Load first page of classes
+  // Reset filter state to all and load review classes
+  currentReviewAction = 'all';
+  const actionPills = document.querySelectorAll('#reviewActionPills .action-pill');
+  actionPills.forEach((p) => p.classList.toggle('active', p.dataset.action === 'all'));
+
   reviewPage = 0;
   fetchReviewClasses();
 }
@@ -196,6 +234,12 @@ async function fetchReviewClasses() {
   const offset = reviewPage * reviewPageSize;
 
   let url = `${API_BASE}/schedule/${currentScheduleId}/classes?limit=${reviewPageSize}&offset=${offset}`;
+  if (currentReviewAction && currentReviewAction !== 'all') {
+    url += `&action=${encodeURIComponent(currentReviewAction)}`;
+  }
+  if (currentReviewSortBy) {
+    url += `&sort_by=${encodeURIComponent(currentReviewSortBy)}`;
+  }
   if (search) url += `&search=${encodeURIComponent(search)}`;
   if (ctype) url += `&class_type=${encodeURIComponent(ctype)}`;
 
@@ -234,11 +278,13 @@ function renderReviewTable(items, total, offset) {
   }
 
   tbody.innerHTML = items.map((c) => {
-    let actionBadge = `<span class="badge badge-priority-low">Kept</span>`;
-    if (c.action === 'added') {
-      actionBadge = `<span class="badge badge-status-active">+ Added</span>`;
-    } else if (c.action === 'added_unassigned') {
-      actionBadge = `<span class="badge badge-priority-high">Placeholder</span>`;
+    let actionBadge = `<span class="badge-action badge-action-kept">Kept</span>`;
+    if (c.action === 'moved') {
+      actionBadge = `<span class="badge-action badge-action-moved">🔄 Moved</span>`;
+    } else if (c.action === 'created') {
+      actionBadge = `<span class="badge-action badge-action-created">➕ Created</span>`;
+    } else if (c.action === 'deleted') {
+      actionBadge = `<span class="badge-action badge-action-deleted">❌ Deleted</span>`;
     }
 
     return `
@@ -250,13 +296,17 @@ function renderReviewTable(items, total, offset) {
           ${c.hidden === 'Yes' ? '<span class="badge badge-priority-high" style="margin-left: 6px;">Hidden</span>' : ''}
         </td>
         <td><code>${escapeHtml(c.account)}</code></td>
-        <td>${escapeHtml(c.vtc || '-')}</td>
         <td>
           <span class="badge badge-priority-${c.class_type === 'Teens' ? 'medium' : (c.class_type === 'Speak+' ? 'high' : 'low')}">
             ${escapeHtml(c.class_type)}
           </span>
         </td>
         <td>${actionBadge}</td>
+        <td style="max-width: 380px;">
+          <span style="font-size: 12px; font-weight: 500; color: var(--text-main); line-height: 1.4; display: block;">
+            ${escapeHtml(c.comment || '-')}
+          </span>
+        </td>
       </tr>
     `;
   }).join('');
@@ -269,7 +319,7 @@ function renderReviewTable(items, total, offset) {
 function setupTeachersView() {
   const searchInput = document.getElementById('teacherSearchInput');
   const filterBtns = document.querySelectorAll('[data-tfilter]');
-  const addModal = document.getElementById('teacherModal');
+  const teacherModal = document.getElementById('teacherModal');
   const btnOpen = document.getElementById('btnOpenAddTeacher');
   const btnClose = document.getElementById('btnCloseTeacherModal');
   const btnCancel = document.getElementById('btnCancelTeacherModal');
@@ -331,43 +381,63 @@ function setupTeachersView() {
     fetchTeachers();
   });
 
+  // Open Add Teacher Modal
   btnOpen.addEventListener('click', () => {
     form.reset();
+    document.getElementById('tIsEdit').value = 'false';
     document.getElementById('teacherModalTitle').textContent = 'Add New Teacher';
-    document.getElementById('tAccount').readOnly = false;
-    addModal.classList.add('show');
+    const accInput = document.getElementById('tAccount');
+    accInput.readOnly = false;
+    accInput.style.backgroundColor = '';
+    teacherModal.classList.add('show');
   });
 
-  const closeTeacherModal = () => addModal.classList.remove('show');
+  const closeTeacherModal = () => teacherModal.classList.remove('show');
   btnClose.addEventListener('click', closeTeacherModal);
   btnCancel.addEventListener('click', closeTeacherModal);
+  teacherModal.addEventListener('click', (e) => {
+    if (e.target === teacherModal) closeTeacherModal();
+  });
 
+  // Submit Add / Edit Teacher
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const isEdit = document.getElementById('tIsEdit').value === 'true';
+    const account = document.getElementById('tAccount').value.trim();
+
     const payload = {
-      account: document.getElementById('tAccount').value.trim(),
       name: document.getElementById('tName').value.trim(),
       vtc: document.getElementById('tVtc').value.trim(),
       email: document.getElementById('tEmail').value.trim(),
       status: document.getElementById('tStatus').value,
       shift_id: document.getElementById('tShift').value,
       rotation_id: document.getElementById('tRotation').value,
-      fixed_day_off: 'Thursday',
-      weekend_group: 'A',
+      fixed_day_off: document.getElementById('tFixedDayOff').value,
+      weekend_group: document.getElementById('tWeekendGroup').value,
       teens_qualified: document.getElementById('tTeens').checked,
       speak_plus_qualified: document.getElementById('tSpeakPlus').checked,
     };
 
     try {
-      const res = await fetch(`${API_BASE}/teachers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      let res;
+      if (isEdit) {
+        res = await fetch(`${API_BASE}/teachers/${encodeURIComponent(account)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        payload.account = account;
+        res = await fetch(`${API_BASE}/teachers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
 
       if (res.ok) {
         closeTeacherModal();
-        showToast(`Teacher ${payload.name} saved`);
+        showToast(`Teacher ${payload.name} saved successfully`);
         fetchTeachers();
       } else {
         const err = await res.json();
@@ -397,13 +467,25 @@ async function fetchTeachers() {
 }
 
 function updateTeacherCounts() {
-  const total = teachers.length;
-  const teens = teachers.filter((t) => t.teens_qualified).length;
-  const speak = teachers.filter((t) => t.speak_plus_qualified).length;
+  const activeCount = teachers.filter((t) => t.status === 'active').length;
+  const totalCount = teachers.length;
+  // Placeholders excluded from teens and speak+ counts
+  const teensCount = teachers.filter((t) => t.teens_qualified && t.status !== 'placeholder').length;
+  const speakCount = teachers.filter((t) => t.speak_plus_qualified && t.status !== 'placeholder').length;
+  const placeholderCount = teachers.filter((t) => t.status === 'placeholder').length;
+  const archivedCount = teachers.filter((t) => t.status === 'archived').length;
 
-  document.getElementById('countAllTeachers').textContent = total;
-  document.getElementById('countTeensTeachers').textContent = teens;
-  document.getElementById('countSpeakTeachers').textContent = speak;
+  const setTxt = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  };
+
+  setTxt('countActiveTeachers', activeCount);
+  setTxt('countAllTeachers', totalCount);
+  setTxt('countTeensTeachers', teensCount);
+  setTxt('countSpeakTeachers', speakCount);
+  setTxt('countPlaceholders', placeholderCount);
+  setTxt('countArchivedTeachers', archivedCount);
 }
 
 function updateSkillSectionView() {
@@ -415,14 +497,14 @@ function updateSkillSectionView() {
   if (currentTeacherTab === 'teens') {
     sec.style.display = 'block';
     title.textContent = 'Add Teacher to Teens Qualification List';
-    desc.textContent = 'Select any teacher below to authorize them for 1-hour Teen classes.';
-    const candidates = teachers.filter((t) => !t.teens_qualified);
+    desc.textContent = 'Select any active teacher below to authorize them for 1-hour Teen classes.';
+    const candidates = teachers.filter((t) => !t.teens_qualified && t.status === 'active');
     sel.innerHTML = candidates.map((t) => `<option value="${t.account}">${escapeHtml(t.name)} (${t.account})</option>`).join('');
   } else if (currentTeacherTab === 'speak_plus') {
     sec.style.display = 'block';
     title.textContent = 'Add Teacher to Speak+ Qualification List';
-    desc.textContent = 'Select any teacher below to authorize them for 30-minute Speak+ classes.';
-    const candidates = teachers.filter((t) => !t.speak_plus_qualified);
+    desc.textContent = 'Select any active teacher below to authorize them for 30-minute Speak+ classes.';
+    const candidates = teachers.filter((t) => !t.speak_plus_qualified && t.status === 'active');
     sel.innerHTML = candidates.map((t) => `<option value="${t.account}">${escapeHtml(t.name)} (${t.account})</option>`).join('');
   } else {
     sec.style.display = 'none';
@@ -434,9 +516,11 @@ function renderTeachersTable() {
   if (!tbody) return;
 
   const filtered = teachers.filter((t) => {
-    if (currentTeacherTab === 'teens' && !t.teens_qualified) return false;
-    if (currentTeacherTab === 'speak_plus' && !t.speak_plus_qualified) return false;
+    if (currentTeacherTab === 'active' && t.status !== 'active') return false;
+    if (currentTeacherTab === 'teens' && (!t.teens_qualified || t.status === 'placeholder')) return false;
+    if (currentTeacherTab === 'speak_plus' && (!t.speak_plus_qualified || t.status === 'placeholder')) return false;
     if (currentTeacherTab === 'placeholder' && t.status !== 'placeholder') return false;
+    if (currentTeacherTab === 'archived' && t.status !== 'archived') return false;
 
     if (teacherSearchQuery) {
       const nameMatch = (t.name || '').toLowerCase().includes(teacherSearchQuery);
@@ -459,35 +543,44 @@ function renderTeachersTable() {
   }
 
   tbody.innerHTML = filtered.map((t) => {
-    const isTeensTab = currentTeacherTab === 'teens';
-    const isSpeakTab = currentTeacherTab === 'speak_plus';
+    let statusBadge = `<span class="badge badge-status-active">Active</span>`;
+    if (t.status === 'archived') {
+      statusBadge = `<span class="badge" style="background-color: var(--border-subtle); color: var(--text-muted);">Archived</span>`;
+    } else if (t.status === 'placeholder') {
+      statusBadge = `<span class="badge badge-priority-medium">Placeholder</span>`;
+    }
+
+    const shiftDisplay = (t.shift_id || 'day').replace('_', ' ').toUpperCase();
+    const rotDisplay = (t.rotation_id || 'none').toUpperCase();
 
     return `
       <tr>
         <td><strong>${escapeHtml(t.name)}</strong></td>
         <td><code>${escapeHtml(t.account)}</code></td>
         <td>${escapeHtml(t.vtc || '-')}</td>
-        <td><span class="badge badge-priority-low">${escapeHtml(t.shift_id.toUpperCase())}</span></td>
-        <td><span class="badge badge-priority-medium">${escapeHtml(t.rotation_id ? t.rotation_id.toUpperCase() : 'ROT-1')}</span></td>
-        <td>${escapeHtml(t.fixed_day_off || 'Thu')}</td>
+        <td>${statusBadge}</td>
+        <td><span class="badge badge-priority-low">${escapeHtml(shiftDisplay)}</span></td>
+        <td><span class="badge badge-priority-medium">${escapeHtml(rotDisplay)}</span></td>
+        <td>${escapeHtml(t.fixed_day_off || 'Thursday')}</td>
+        <td><strong>Group ${escapeHtml(t.weekend_group || 'A')}</strong></td>
         <td>
-          ${isTeensTab
-            ? `<button class="btn btn-sm btn-danger-ghost" onclick="toggleQualification('${t.account}', 'teens_qualified', false)">Remove</button>`
-            : `<button class="btn btn-sm ${t.teens_qualified ? 'btn-primary' : 'btn-secondary'}" onclick="toggleQualification('${t.account}', 'teens_qualified', ${!t.teens_qualified})">${t.teens_qualified ? 'Yes' : 'No'}</button>`
-          }
+          <div style="display: flex; gap: 4px;">
+            <button class="btn btn-sm ${t.teens_qualified ? 'btn-primary' : 'btn-secondary'}"
+              style="padding: 2px 7px; height: 24px; font-size: 11px;"
+              onclick="toggleQualification('${t.account}', 'teens_qualified', ${!t.teens_qualified})">
+              Teens: ${t.teens_qualified ? 'Yes' : 'No'}
+            </button>
+            <button class="btn btn-sm ${t.speak_plus_qualified ? 'btn-primary' : 'btn-secondary'}"
+              style="padding: 2px 7px; height: 24px; font-size: 11px;"
+              onclick="toggleQualification('${t.account}', 'speak_plus_qualified', ${!t.speak_plus_qualified})">
+              Speak+: ${t.speak_plus_qualified ? 'Yes' : 'No'}
+            </button>
+          </div>
         </td>
-        <td>
-          ${isSpeakTab
-            ? `<button class="btn btn-sm btn-danger-ghost" onclick="toggleQualification('${t.account}', 'speak_plus_qualified', false)">Remove</button>`
-            : `<button class="btn btn-sm ${t.speak_plus_qualified ? 'btn-primary' : 'btn-secondary'}" onclick="toggleQualification('${t.account}', 'speak_plus_qualified', ${!t.speak_plus_qualified})">${t.speak_plus_qualified ? 'Yes' : 'No'}</button>`
-          }
-        </td>
-        <td>
-          <span class="badge badge-status-${t.status === 'active' ? 'active' : 'paused'}">
-            ${escapeHtml(t.status.toUpperCase())}
-          </span>
-        </td>
-        <td>
+        <td style="text-align: right;">
+          <button class="btn btn-sm btn-secondary" onclick="openEditTeacherModal('${t.account}')" title="Edit Teacher Rotation, Shift, and Off Days">
+            Edit
+          </button>
           <button class="btn btn-sm btn-danger-ghost" onclick="deleteTeacher('${t.account}')" title="Delete Teacher">
             Delete
           </button>
@@ -497,9 +590,39 @@ function renderTeachersTable() {
   }).join('');
 }
 
+window.openEditTeacherModal = function(account) {
+  const t = teachers.find((x) => x.account === account);
+  if (!t) return;
+
+  const modal = document.getElementById('teacherModal');
+  const form = document.getElementById('teacherForm');
+  form.reset();
+
+  document.getElementById('tIsEdit').value = 'true';
+  document.getElementById('teacherModalTitle').textContent = `Edit Teacher: ${t.name}`;
+
+  const accInput = document.getElementById('tAccount');
+  accInput.value = t.account;
+  accInput.readOnly = true;
+  accInput.style.backgroundColor = 'var(--border-subtle)';
+
+  document.getElementById('tName').value = t.name || '';
+  document.getElementById('tVtc').value = t.vtc || '';
+  document.getElementById('tEmail').value = t.email || '';
+  document.getElementById('tStatus').value = t.status || 'active';
+  document.getElementById('tShift').value = t.shift_id || 'day';
+  document.getElementById('tRotation').value = t.rotation_id || 'rot-1';
+  document.getElementById('tFixedDayOff').value = t.fixed_day_off || 'Thursday';
+  document.getElementById('tWeekendGroup').value = t.weekend_group || 'A';
+  document.getElementById('tTeens').checked = !!t.teens_qualified;
+  document.getElementById('tSpeakPlus').checked = !!t.speak_plus_qualified;
+
+  modal.classList.add('show');
+};
+
 window.toggleQualification = async function(account, field, value) {
   try {
-    const res = await fetch(`${API_BASE}/teachers/${account}`, {
+    const res = await fetch(`${API_BASE}/teachers/${encodeURIComponent(account)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [field]: value }),
@@ -516,7 +639,7 @@ window.toggleQualification = async function(account, field, value) {
 window.deleteTeacher = async function(account) {
   if (!confirm(`Are you sure you want to delete teacher ${account}?`)) return;
   try {
-    const res = await fetch(`${API_BASE}/teachers/${account}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/teachers/${encodeURIComponent(account)}`, { method: 'DELETE' });
     if (res.ok) {
       showToast('Teacher deleted');
       fetchTeachers();
@@ -529,8 +652,9 @@ window.deleteTeacher = async function(account) {
 function populateTeacherDropdowns() {
   const sel = document.getElementById('adjTeacherSelect');
   if (!sel) return;
-  sel.innerHTML = teachers.map((t) => `
-    <option value="${t.account}">${escapeHtml(t.name)} (${t.account})</option>
+  const activeTeachers = teachers.filter((t) => t.status === 'active');
+  sel.innerHTML = activeTeachers.map((t) => `
+    <option value="${t.account}">${escapeHtml(t.name)} (${t.account} - ${(t.shift_id || 'day').toUpperCase()})</option>
   `).join('');
 }
 
@@ -546,44 +670,113 @@ async function fetchShiftsAndRotations() {
     ]);
 
     if (shiftsRes.ok) {
-      const shifts = await shiftsRes.json();
+      shifts = await shiftsRes.json();
       renderShiftsCards(shifts);
     }
     if (rotsRes.ok) {
       shiftRotations = await rotsRes.json();
-      renderRotationsList(shiftRotations);
+      renderRotationsList();
     }
   } catch (err) {
     console.error('Failed to load shifts and rotations', err);
   }
 }
 
-function renderShiftsCards(shifts) {
-  const grid = document.getElementById('shiftsCardsGrid');
-  if (!grid) return;
+function renderShiftsCards(allShifts) {
+  const rotatingGrid = document.getElementById('shiftsCardsGrid');
+  const nonRotatingGrid = document.getElementById('nonRotatingShiftsGrid');
+  if (!rotatingGrid) return;
 
-  grid.innerHTML = shifts.map((s) => `
-    <div class="stat-card">
-      <div class="stat-header">
-        <span class="stat-label">${escapeHtml(s.name)}</span>
-        <span class="badge badge-priority-low">${escapeHtml(s.id.toUpperCase())}</span>
+  const rotatingShifts = allShifts.filter((s) => ['day', 'evening', 'latam'].includes(s.id));
+  const nonRotatingShifts = allShifts.filter((s) => !['day', 'evening', 'latam'].includes(s.id));
+
+  // 3 Clickable Rotating Shift KPI Cards
+  rotatingGrid.innerHTML = rotatingShifts.map((s) => {
+    const isSelected = selectedShiftFilter === s.id;
+    const teacherCount = teachers.filter((t) => t.shift_id === s.id && t.status === 'active').length;
+
+    return `
+      <div class="stat-card clickable ${isSelected ? 'active' : ''}" onclick="selectShiftCard('${s.id}')">
+        <div class="stat-header">
+          <span class="stat-label">${escapeHtml(s.name)}</span>
+          <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; height: 24px; font-size: 11px;"
+            onclick="event.stopPropagation(); openEditShiftModal('${s.id}')">
+            Edit Times
+          </button>
+        </div>
+        <div class="stat-value" style="font-size: 22px; margin-top: 8px;">
+          ${escapeHtml(s.start_time)} – ${escapeHtml(s.end_time)} CET
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+          <span class="stat-sub">${escapeHtml(s.description || 'Configured shift window')}</span>
+          <span class="badge badge-priority-low">${teacherCount} Active Teachers</span>
+        </div>
       </div>
-      <div class="stat-value" style="font-size: 20px; margin-top: 10px;">
-        ${escapeHtml(s.start_time)} – ${escapeHtml(s.end_time)}
-      </div>
-      <span class="stat-sub">${escapeHtml(s.description || 'Configured shift window')}</span>
-    </div>
-  `).join('');
+    `;
+  }).join('');
+
+  // Non-Rotating Shifts
+  if (nonRotatingGrid) {
+    nonRotatingGrid.innerHTML = nonRotatingShifts.map((s) => {
+      const teacherCount = teachers.filter((t) => t.shift_id === s.id && t.status === 'active').length;
+      return `
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-label">${escapeHtml(s.name)}</span>
+            <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; height: 24px; font-size: 11px;"
+              onclick="openEditShiftModal('${s.id}')">
+              Edit
+            </button>
+          </div>
+          <div class="stat-value" style="font-size: 18px; margin-top: 6px;">
+            ${escapeHtml(s.start_time)} – ${escapeHtml(s.end_time)} CET
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+            <span class="stat-sub">${escapeHtml(s.description || 'Fixed hours')}</span>
+            <span class="badge badge-priority-low">${teacherCount} Teachers</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
 }
 
-function renderRotationsList(rotations) {
+window.selectShiftCard = function(shiftId) {
+  selectedShiftFilter = shiftId;
+  const titleEl = document.getElementById('rotationsListTitle');
+  if (titleEl) {
+    const sObj = shifts.find((x) => x.id === shiftId);
+    titleEl.textContent = sObj ? `${sObj.name} Rotations (2-Week Cycle)` : 'All Shift Rotation Patterns (2-Week Cycle)';
+  }
+  renderShiftsCards(shifts);
+  renderRotationsList();
+};
+
+window.filterShiftRotations = function(shiftId) {
+  selectShiftCard(shiftId);
+};
+
+function renderRotationsList() {
   const container = document.getElementById('rotationsListContainer');
   if (!container) return;
 
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const fullDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  container.innerHTML = rotations.map((r, idx) => {
+  const displayedRotations = selectedShiftFilter === 'all'
+    ? shiftRotations
+    : shiftRotations.filter((r) => r.shift_id === selectedShiftFilter);
+
+  if (displayedRotations.length === 0) {
+    container.innerHTML = `
+      <div class="card" style="text-align: center; padding: 32px; color: var(--text-muted);">
+        No rotations found for selected shift. Click "Add Rotation Group" to create one.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = displayedRotations.map((r) => {
     const offDay = r.fixed_day_off || 'Thursday';
 
     // Week 1 cells
@@ -606,7 +799,10 @@ function renderRotationsList(rotations) {
             <span class="badge badge-priority-low" style="margin-left: 8px;">${escapeHtml((r.shift_id || 'day').toUpperCase())}</span>
             <span class="text-muted" style="font-size: 12px; margin-left: 8px;">Fixed Off: <strong>${escapeHtml(r.fixed_day_off)}</strong></span>
           </div>
-          <span class="text-muted" style="font-size: 12px;">${r.teacher_count || 0} Teachers Assigned</span>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="text-muted" style="font-size: 12px;">${r.teacher_count || 0} Teachers Assigned</span>
+            <button class="btn btn-sm btn-secondary" onclick="openAddRotationModal('${r.id}')">Edit Pattern</button>
+          </div>
         </div>
 
         <div class="table-responsive">
@@ -636,14 +832,124 @@ function renderRotationsList(rotations) {
   }).join('');
 }
 
-window.openAddRotationModal = function() {
-  document.getElementById('rotationForm').reset();
+// Edit Shift Modal
+window.openEditShiftModal = function(shiftId) {
+  const s = shifts.find((x) => x.id === shiftId);
+  if (!s) return;
+
+  document.getElementById('editShiftId').value = s.id;
+  document.getElementById('editShiftName').value = s.name;
+  document.getElementById('editShiftStartTime').value = s.start_time;
+  document.getElementById('editShiftEndTime').value = s.end_time;
+  document.getElementById('editShiftDesc').value = s.description || '';
+  document.getElementById('editShiftModalTitle').textContent = `Edit Shift: ${s.name}`;
+
+  document.getElementById('editShiftModal').classList.add('show');
+};
+
+window.closeEditShiftModal = function() {
+  document.getElementById('editShiftModal').classList.remove('show');
+};
+
+// Form submit for Shift hours
+const editShiftForm = document.getElementById('editShiftForm');
+if (editShiftForm) {
+  editShiftForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('editShiftId').value;
+    const payload = {
+      name: document.getElementById('editShiftName').value.trim(),
+      start_time: document.getElementById('editShiftStartTime').value.trim(),
+      end_time: document.getElementById('editShiftEndTime').value.trim(),
+      description: document.getElementById('editShiftDesc').value.trim(),
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/shifts/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        closeEditShiftModal();
+        showToast('Shift working hours updated');
+        fetchShiftsAndRotations();
+      } else {
+        alert('Failed to update shift');
+      }
+    } catch (err) {
+      alert(`Error updating shift: ${err.message}`);
+    }
+  });
+}
+
+// Rotation Modal Add / Edit
+window.openAddRotationModal = function(rotId) {
+  const form = document.getElementById('rotationForm');
+  form.reset();
+
+  if (rotId) {
+    const rot = shiftRotations.find((x) => x.id === rotId);
+    if (rot) {
+      document.getElementById('rotationModalTitle').textContent = `Edit Rotation: ${rot.name}`;
+      document.getElementById('rotName').value = rot.name;
+      document.getElementById('rotShift').value = rot.shift_id || 'day';
+      document.getElementById('rotDayOff').value = rot.fixed_day_off || 'Thursday';
+      document.getElementById('rotWeekendPattern').value = rot.week1_weekend_off ? 'w1_off' : 'w2_off';
+      document.getElementById('rotDesc').value = rot.description || '';
+      form.dataset.editId = rot.id;
+    }
+  } else {
+    document.getElementById('rotationModalTitle').textContent = 'Add Rotation Group';
+    delete form.dataset.editId;
+  }
+
   document.getElementById('rotationModal').classList.add('show');
 };
 
 window.closeAddRotationModal = function() {
   document.getElementById('rotationModal').classList.remove('show');
 };
+
+const rotForm = document.getElementById('rotationForm');
+if (rotForm) {
+  rotForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const isEdit = !!rotForm.dataset.editId;
+    const rotId = rotForm.dataset.editId;
+    const pattern = document.getElementById('rotWeekendPattern').value;
+
+    const payload = {
+      name: document.getElementById('rotName').value.trim(),
+      shift_id: document.getElementById('rotShift').value,
+      fixed_day_off: document.getElementById('rotDayOff').value,
+      week1_weekend_off: pattern === 'w1_off',
+      week2_weekend_off: pattern === 'w2_off',
+      description: document.getElementById('rotDesc').value.trim(),
+    };
+
+    try {
+      const url = isEdit ? `${API_BASE}/rotation-groups/${rotId}` : `${API_BASE}/rotation-groups`;
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        closeAddRotationModal();
+        showToast('Rotation group saved');
+        fetchShiftsAndRotations();
+      } else {
+        alert('Failed to save rotation group');
+      }
+    } catch (err) {
+      alert(`Error saving rotation: ${err.message}`);
+    }
+  });
+}
 
 
 // ==============================================================================
@@ -652,17 +958,33 @@ window.closeAddRotationModal = function() {
 function setupAdjustmentsView() {
   const modal = document.getElementById('adjModal');
   const form = document.getElementById('adjForm');
+  const btnOpen = document.getElementById('btnOpenAddAdjustment');
 
-  // Direct modal opener & closer functions
-  window.openAdjustmentModal = function() {
+  window.openAdjustmentModal = async function() {
     form.reset();
+    if (!teachers || teachers.length === 0) {
+      await fetchTeachers();
+    }
     populateTeacherDropdowns();
+
+    // Default start date to today
+    const today = new Date().toISOString().split('T')[0];
+    const startInput = document.getElementById('adjStartDate');
+    if (startInput) startInput.value = today;
+
     modal.classList.add('show');
   };
 
   window.closeAdjustmentModal = function() {
     modal.classList.remove('show');
   };
+
+  if (btnOpen) {
+    btnOpen.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.openAdjustmentModal();
+    });
+  }
 
   modal.addEventListener('click', (e) => {
     if (e.target === modal) window.closeAdjustmentModal();
@@ -689,7 +1011,7 @@ function setupAdjustmentsView() {
 
       if (res.ok) {
         window.closeAdjustmentModal();
-        showToast('Adjustment created');
+        showToast('Schedule adjustment created');
         fetchAdjustments();
       } else {
         alert('Failed to save adjustment');
@@ -722,7 +1044,7 @@ function renderAdjustmentsTable() {
     tbody.innerHTML = `
       <tr>
         <td colspan="8" style="text-align: center; padding: 36px; color: var(--text-muted);">
-          No adjustments recorded. Click "Add Adjustment" to configure specific constraints (e.g. childcare, unavailability).
+          No adjustments recorded. Click "Add Adjustment" to configure specific constraints (e.g. childcare at 14:00, no classes before 10:00).
         </td>
       </tr>
     `;
@@ -730,22 +1052,41 @@ function renderAdjustmentsTable() {
   }
 
   tbody.innerHTML = adjustments.map((a) => {
-    let typeBadge = `<span class="badge badge-priority-medium">${escapeHtml(a.type.replace('_', ' ').toUpperCase())}</span>`;
+    let typeBadge = `<span class="badge badge-priority-medium">${escapeHtml(a.type)}</span>`;
+    if (a.type === 'block_slot') {
+      typeBadge = `<span class="badge badge-priority-high">Blocked Slot</span>`;
+    } else if (a.type === 'no_before') {
+      typeBadge = `<span class="badge badge-priority-low">No Before</span>`;
+    } else if (a.type === 'no_after') {
+      typeBadge = `<span class="badge badge-priority-low">No After</span>`;
+    } else if (a.type === 'unavailable_day' || a.type === 'full_leave') {
+      typeBadge = `<span class="badge badge-priority-high">Full Day Off</span>`;
+    }
+
+    const dateRange = a.end_date
+      ? `${a.start_date} to ${a.end_date}`
+      : `${a.start_date} (Ongoing)`;
+
     return `
       <tr>
-        <td><strong>${escapeHtml(a.teacher_name)}</strong><br><small class="text-muted">${escapeHtml(a.teacher_account)}</small></td>
-        <td>${typeBadge}</td>
-        <td><code>${escapeHtml(a.time_value || 'Full Day')}</code></td>
-        <td>${escapeHtml(a.day_of_week)}</td>
-        <td>${escapeHtml(a.start_date)} ${a.end_date ? 'to ' + escapeHtml(a.end_date) : '(Ongoing)'}</td>
-        <td>${escapeHtml(a.reason || '-')}</td>
         <td>
-          <button class="btn btn-sm ${a.is_active ? 'btn-primary' : 'btn-secondary'}" onclick="toggleAdjustment('${a.id}')">
+          <strong>${escapeHtml(a.teacher_name || a.teacher_account)}</strong>
+          <br><small class="text-muted"><code>${escapeHtml(a.teacher_account)}</code></small>
+        </td>
+        <td>${typeBadge}</td>
+        <td><strong>${escapeHtml(a.time_value || '-')}</strong></td>
+        <td>${escapeHtml(a.day_of_week === 'all' ? 'All Days' : a.day_of_week)}</td>
+        <td style="font-size: 12px;">${escapeHtml(dateRange)}</td>
+        <td style="max-width: 200px;">${escapeHtml(a.reason || '-')}</td>
+        <td>
+          <button class="btn btn-sm ${a.is_active ? 'btn-primary' : 'btn-secondary'}"
+            style="padding: 2px 8px; height: 24px; font-size: 11px;"
+            onclick="toggleAdjustment('${a.id}')">
             ${a.is_active ? 'Active' : 'Disabled'}
           </button>
         </td>
         <td>
-          <button class="btn btn-sm btn-danger-ghost" onclick="deleteAdjustment('${a.id}')">
+          <button class="btn btn-sm btn-danger-ghost" onclick="deleteAdjustment('${a.id}')" title="Delete Adjustment">
             Delete
           </button>
         </td>
@@ -771,7 +1112,7 @@ window.deleteAdjustment = async function(id) {
   try {
     const res = await fetch(`${API_BASE}/adjustments/${id}`, { method: 'DELETE' });
     if (res.ok) {
-      showToast('Adjustment deleted');
+      showToast('Adjustment removed');
       fetchAdjustments();
     }
   } catch (err) {
@@ -816,4 +1157,3 @@ function escapeHtml(str) {
   div.textContent = str || '';
   return div.innerHTML;
 }
-

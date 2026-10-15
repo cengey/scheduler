@@ -68,6 +68,23 @@ function setupGeneratorView() {
   const weekDateInput = document.getElementById('weekStartDate');
   const dateHint = document.getElementById('dateHintText');
 
+  // Auto-detect class type dropdown from file name if keywords match
+  const bindAutoDetect = (fileInputId, selectId) => {
+    const input = document.getElementById(fileInputId);
+    const select = document.getElementById(selectId);
+    if (!input || !select) return;
+    input.addEventListener('change', () => {
+      if (!input.files || input.files.length === 0) return;
+      const fname = input.files[0].name.toLowerCase();
+      if (fname.includes('teen')) select.value = 'Teens';
+      else if (fname.includes('speak')) select.value = 'Speak+';
+      else if (fname.includes('adult')) select.value = 'Adult';
+    });
+  };
+  bindAutoDetect('file1', 'typeFile1');
+  bindAutoDetect('file2', 'typeFile2');
+  bindAutoDetect('file3', 'typeFile3');
+
   // Restrict to Monday on change
   weekDateInput.addEventListener('change', () => {
     if (!weekDateInput.value) return;

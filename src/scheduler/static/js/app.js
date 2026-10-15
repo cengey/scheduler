@@ -15,12 +15,7 @@ let currentTeacherTab = 'all';
 let teacherSearchQuery = '';
 
 // DOM Elements
-const statusBadgeEl = document.getElementById('statusBadge');
-const statusTextEl = document.getElementById('statusText');
 const toastContainer = document.getElementById('toastContainer');
-const themeToggleBtn = document.getElementById('themeToggleBtn');
-const themeIconSun = document.getElementById('themeIconSun');
-const themeIconMoon = document.getElementById('themeIconMoon');
 
 // Navigation
 const navItems = document.querySelectorAll('.nav-item');
@@ -29,9 +24,6 @@ const viewPanels = document.querySelectorAll('.view-panel');
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
-  fetchHealth();
-  setInterval(renderUptime, 1000);
-
   setupNavigation();
   setupGeneratorView();
   setupTeachersView();
@@ -793,27 +785,10 @@ window.deleteAdjustment = async function(id) {
 // ==============================================================================
 function initTheme() {
   const saved = localStorage.getItem('scheduler-theme') || 'light';
-  applyTheme(saved);
-  themeToggleBtn.addEventListener('click', toggleTheme);
-}
-
-function toggleTheme() {
-  const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-  const target = current === 'dark' ? 'light' : 'dark';
-  applyTheme(target);
-  localStorage.setItem('scheduler-theme', target);
-  showToast(target === 'dark' ? 'Dark theme enabled' : 'Light theme enabled');
-}
-
-function applyTheme(theme) {
-  if (theme === 'dark') {
+  if (saved === 'dark') {
     document.documentElement.setAttribute('data-theme', 'dark');
-    themeIconSun.style.display = 'block';
-    themeIconMoon.style.display = 'none';
   } else {
     document.documentElement.removeAttribute('data-theme');
-    themeIconSun.style.display = 'none';
-    themeIconMoon.style.display = 'block';
   }
 }
 
@@ -836,32 +811,9 @@ function showToast(message) {
   }, 2600);
 }
 
-async function fetchHealth() {
-  try {
-    const res = await fetch(`${API_BASE}/health`);
-    if (res.ok) {
-      const data = await res.json();
-      serverStartedAt = Date.now() - data.uptime_seconds * 1000;
-      statusBadgeEl.style.color = 'var(--success)';
-      statusBadgeEl.style.backgroundColor = 'var(--success-tint)';
-      statusBadgeEl.style.borderColor = 'var(--success-border)';
-      statusTextEl.textContent = 'Backend: Connected';
-    }
-  } catch (err) {
-    statusBadgeEl.style.color = 'var(--danger)';
-    statusBadgeEl.style.backgroundColor = 'var(--danger-tint)';
-    statusBadgeEl.style.borderColor = 'var(--danger-border)';
-    statusTextEl.textContent = 'Backend: Disconnected';
-  }
-}
-
-function renderUptime() {
-  // Pure local tick - no network requests
-  if (!serverStartedAt) return;
-}
-
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str || '';
   return div.innerHTML;
 }
+
